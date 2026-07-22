@@ -216,7 +216,7 @@ export type RecommendationStatus = z.infer<typeof RecommendationStatusEnum>;
 export const RecommendationSchema = z.object({
   id: z.string().optional(),
   company_id: z.string().optional(),
-  alert_id: z.string().optional(),
+  alert_id: z.string().nullable().optional(),
   recommendation_date: z.string().optional(),
   category: z.string().optional(),
   priority: RecommendationPriorityEnum,
@@ -244,7 +244,8 @@ export type TaskPriority = z.infer<typeof TaskPriorityEnum>;
 
 export const TaskSchema = z.object({
   id: z.string().optional(),
-  recommendation_id: z.string().optional(),
+  company_id: z.string(),
+  recommendation_id: z.string().nullable().optional(),
   title: z.string(),
   description: z.string().optional(),
   category: z.string().optional(),
@@ -253,6 +254,7 @@ export const TaskSchema = z.object({
   due_date: z.string().nullable().optional(),
   assigned_to: z.string().nullable().optional(),
   target_metric: z.string().optional(),
+  signature: z.string().optional(),
   tags: z.array(z.string()).optional(),
   created_at: z.string().optional(),
   updated_at: z.string().optional(),

@@ -51,7 +51,11 @@ export interface PersistenceStats {
   recommendationsCreated: number;
   recommendationsUpdated: number;
   recommendationsFailed: number;
+  tasksAttempted: number;
   tasksCreated: number;
+  tasksUpdated: number;
+  tasksFailed: number;
+  taskErrorCode: string | null;
 }
 
 export type LandingPageType =
@@ -746,7 +750,11 @@ async function persistDiagnosticsToSupabase(
     recommendationsCreated: 0,
     recommendationsUpdated: 0,
     recommendationsFailed: 0,
+    tasksAttempted: 0,
     tasksCreated: 0,
+    tasksUpdated: 0,
+    tasksFailed: 0,
+    taskErrorCode: null,
   };
 
   const supabase = getSupabaseServerClient();
@@ -871,6 +879,8 @@ async function persistDiagnosticsToSupabase(
       }
 
       // ─── RECOMMENDATIONS PERSISTENCE & DEDUPLICATION (Requisitos 3, 4, 5, 6, 12, 13, 14, 15, 16) ───
+      let recommendationId: string | null = null;
+
       if (finding.severity !== "info") {
         stats.recommendationsAttempted++;
 
@@ -923,7 +933,7 @@ async function persistDiagnosticsToSupabase(
           });
         }
 
-        let recommendationId = existingRec?.id;
+        recommendationId = existingRec?.id || null;
 
         if (recommendationId) {
           // UPDATE existing active recommendation (Requisito 14)
@@ -994,34 +1004,101 @@ async function persistDiagnosticsToSupabase(
           }
         }
 
-        // Handle Task creation if priority is high or critical
-        if (recommendationId && (finding.severity === "high" || finding.severity === "critical")) {
+        // ─── TASKS PERSISTENCE & DEDUPLICATION (Requisitos 2, 5, 6, 7, 8, 9) ───
+        if (finding.severity === "high" || finding.severity === "critical") {
+          stats.tasksAttempted++;
+
           let dueDays = 3;
           if (finding.severity === "critical") dueDays = 1;
 
           const dueDateObj = new Date();
           dueDateObj.setUTCDate(dueDateObj.getUTCDate() + dueDays);
 
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const { error: taskErr } = await (supabase as any)
-            .from("tasks")
-            .insert({
-              recommendation_id: recommendationId,
-              title: `[Prioridad ${finding.severity.toUpperCase()}] ${recTitle}`,
-              description: finding.proposedAction,
-              category: finding.category,
-              status: "pending",
-              priority: finding.severity,
-              due_date: dueDateObj.toISOString(),
-              target_metric: finding.targetMetric || "",
-              tags: [finding.category, "auto-generated"],
-              created_at: new Date().toISOString(),
-            });
+          const taskSignature = `${companyId}:${ruleId}:${affectedEntity}`;
 
-          if (!taskErr) {
-            stats.tasksCreated++;
+          let taskTitle = `[Prioridad ${finding.severity.toUpperCase()}] ${recTitle}`;
+          let taskTags = [finding.category, "auto-generated"];
+
+          // Requisito 9: Configuración específica para pages-404-critical
+          if (ruleId === "pages-404-critical") {
+            taskTitle = "[Prioridad CRITICAL] Auditar las URLs 404 con mayor tráfico";
+            taskTags = ["404", "pages", "critical"];
+          }
+
+          // Check for existing active task by taskSignature
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const { data: existingTask, error: taskSelectErr } = await (supabase as any)
+            .from("tasks")
+            .select("id")
+            .eq("company_id", companyId)
+            .eq("signature", taskSignature)
+            .in("status", ["pending", "in_progress"])
+            .maybeSingle();
+
+          if (taskSelectErr) {
+            console.error("[Supabase Select Task Error]", {
+              code: taskSelectErr.code,
+              message: taskSelectErr.message,
+            });
+          }
+
+          if (existingTask?.id) {
+            // UPDATE existing active task
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { error: taskUpdateErr } = await (supabase as any)
+              .from("tasks")
+              .update({
+                recommendation_id: recommendationId || null,
+                title: taskTitle,
+                description: finding.proposedAction,
+                category: finding.category,
+                priority: finding.severity,
+                due_date: dueDateObj.toISOString(),
+                target_metric: finding.targetMetric || "",
+                tags: taskTags,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", existingTask.id);
+
+            if (taskUpdateErr) {
+              console.error("[Supabase Task Update Error]", { code: taskUpdateErr.code, message: taskUpdateErr.message });
+              stats.tasksFailed++;
+              stats.taskErrorCode = taskUpdateErr.code || "TASK_UPDATE_FAILED";
+            } else {
+              stats.tasksUpdated++;
+            }
           } else {
-            console.error("[Supabase Task Insert Error]", { code: taskErr.code, message: taskErr.message });
+            // INSERT new task with company_id (NOT NULL)
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { data: newTask, error: taskInsertErr } = await (supabase as any)
+              .from("tasks")
+              .insert({
+                company_id: companyId, // Obligatorio Requisito 5
+                recommendation_id: recommendationId || null,
+                title: taskTitle,
+                description: finding.proposedAction,
+                category: finding.category,
+                status: "pending",
+                priority: finding.severity,
+                due_date: dueDateObj.toISOString(),
+                target_metric: finding.targetMetric || "",
+                signature: taskSignature,
+                tags: taskTags,
+                created_at: new Date().toISOString(),
+              })
+              .select("id")
+              .single();
+
+            if (taskInsertErr || !newTask?.id) {
+              console.error("[Supabase Task Insert Error]", {
+                code: taskInsertErr?.code || "TASK_INSERT_FAILED",
+                message: taskInsertErr?.message || "Failed inserting task record",
+              });
+              stats.tasksFailed++;
+              stats.taskErrorCode = taskInsertErr?.code || "TASK_INSERT_FAILED";
+            } else {
+              stats.tasksCreated++;
+            }
           }
         }
       }
@@ -1043,7 +1120,11 @@ async function persistDiagnosticsToSupabase(
     recommendationsCreated: stats.recommendationsCreated,
     recommendationsUpdated: stats.recommendationsUpdated,
     recommendationsFailed: stats.recommendationsFailed,
+    tasksAttempted: stats.tasksAttempted,
     tasksCreated: stats.tasksCreated,
+    tasksUpdated: stats.tasksUpdated,
+    tasksFailed: stats.tasksFailed,
+    taskErrorCode: stats.taskErrorCode,
   });
 
   return stats;

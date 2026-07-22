@@ -32,7 +32,10 @@ export async function POST(request: NextRequest) {
     const report = await runDiagnosticEngine(period);
     const stats = report.persistenceStats;
 
-    const isSuccess = stats.alertsFailed === 0 && stats.recommendationsFailed === 0;
+    const isSuccess =
+      stats.alertsFailed === 0 &&
+      stats.recommendationsFailed === 0 &&
+      stats.tasksFailed === 0;
 
     return NextResponse.json(
       {
@@ -47,11 +50,15 @@ export async function POST(request: NextRequest) {
         recommendationsCreated: stats.recommendationsCreated,
         recommendationsUpdated: stats.recommendationsUpdated,
         recommendationsFailed: stats.recommendationsFailed,
+        tasksAttempted: stats.tasksAttempted,
         tasksCreated: stats.tasksCreated,
+        tasksUpdated: stats.tasksUpdated,
+        tasksFailed: stats.tasksFailed,
+        taskErrorCode: stats.taskErrorCode,
         healthScore: report.healthBreakdown,
         message: isSuccess
           ? "Análisis determinístico completado exitosamente y persistido en Supabase."
-          : `Análisis completado con ${stats.alertsFailed + stats.recommendationsFailed} errores de persistencia en Supabase.`,
+          : `Análisis completado con ${stats.alertsFailed + stats.recommendationsFailed + stats.tasksFailed} errores de persistencia en Supabase.`,
       },
       { status: isSuccess ? 200 : 207 }
     );
