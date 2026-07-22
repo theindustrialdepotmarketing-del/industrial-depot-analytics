@@ -874,6 +874,14 @@ async function persistDiagnosticsToSupabase(
       if (finding.severity !== "info") {
         stats.recommendationsAttempted++;
 
+        // alert_id must ONLY be passed if a valid real UUID alert exists (Requisitos 3, 4)
+        const realAlertId: string | null = alertId || null;
+        if (!realAlertId) {
+          console.warn(
+            `[Diagnostic Engine] Notice: Alert creation failed or skipped for signature '${signature}'. Recommendation will be saved with alert_id = null.`
+          );
+        }
+
         // Determine specific recommendation title, priority, and expected impact (Requisito 16)
         let recTitle = finding.title;
         let recPriority: "low" | "medium" | "high" | "critical" =
@@ -923,7 +931,7 @@ async function persistDiagnosticsToSupabase(
           const { error: recUpdateErr } = await (supabase as any)
             .from("recommendations")
             .update({
-              alert_id: alertId || null,
+              alert_id: realAlertId,
               recommendation_date: alertDate,
               category: finding.category,
               priority: recPriority,
@@ -955,7 +963,7 @@ async function persistDiagnosticsToSupabase(
             .from("recommendations")
             .insert({
               company_id: companyId,
-              alert_id: alertId || null,
+              alert_id: realAlertId,
               recommendation_date: alertDate,
               category: finding.category,
               priority: recPriority,
