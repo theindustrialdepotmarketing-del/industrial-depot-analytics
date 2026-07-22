@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Industrial Depot Analytics
 
-## Getting Started
+Dashboard de analítica privada para **TheIndustrialDepot.com**, conectado a Google Analytics 4 (GA4) mediante **Vercel OIDC** y **Google Cloud Workload Identity Federation (WIF)**.
 
-First, run the development server:
+---
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## 🛠️ Tecnologías
+
+- **Framework:** Next.js 16 (App Router, Node.js runtime server-side)
+- **Lenguaje:** TypeScript (modo estricto)
+- **Estilos:** Tailwind CSS (Sistema de diseño B2B industrial)
+- **Autenticación App:** NextAuth.js v5 (JWT Session)
+- **Autenticación GA4:** `@vercel/oidc` + `google-auth-library` (Workload Identity Federation sin Service Account JSON)
+- **API GA4:** `@google-analytics/data` (v1beta / BetaAnalyticsDataClient)
+- **Validación:** Zod
+- **Gráficos:** Recharts
+
+---
+
+## 🔐 Seguridad y Autenticación con GA4
+
+Esta aplicación utiliza **Workload Identity Federation** entre Vercel y Google Cloud Console.
+
+### Principios de Seguridad:
+1. **Sin archivos JSON ni claves privadas permanentes** (`GOOGLE_PRIVATE_KEY` no requerida).
+2. **Token OIDC dinámico:** Vercel genera un token JWT OIDC de corta duración firmado por despliegue (`@vercel/oidc`).
+3. **Impersonación de Service Account:** Google STS intercambia el token OIDC de Vercel por un token de acceso de corta duración para la cuenta `ga4-dashboard-reader@industrial-depot-analytics.iam.gserviceaccount.com`.
+4. **Server-Side Only:** Toda la autenticación y las consultas a GA4 se ejecutan exclusivamente en Node.js runtime en el servidor. El navegador nunca recibe tokens ni credenciales.
+
+---
+
+## ⚙️ Variables de Entorno Requeridas
+
+Configura las siguientes variables en el Panel de Vercel (**Settings → Environment Variables**):
+
+```env
+# ─── NextAuth ───
+NEXTAUTH_SECRET=tu-secret-nextauth-32-chars
+NEXTAUTH_URL=https://tu-dominio-vercel.app
+
+# ─── Credenciales Admin ───
+ADMIN_EMAIL=admin@theindustrialdepot.com
+ADMIN_PASSWORD=tu-contrasena-segura
+
+# ─── Google Analytics 4 ───
+GA4_PROPERTY_ID=properties/502218884
+NEXT_PUBLIC_GA4_PROPERTY_ID=502218884
+
+# ─── Google Cloud Workload Identity Federation ───
+GCP_PROJECT_ID=industrial-depot-analytics
+GCP_PROJECT_NUMBER=72682370676
+GCP_WORKLOAD_IDENTITY_PROVIDER=projects/72682370676/locations/global/workloadIdentityPools/vercel/providers/vercel
+GCP_SERVICE_ACCOUNT=ga4-dashboard-reader@industrial-depot-analytics.iam.gserviceaccount.com
+
+# ─── Cron ───
+CRON_SECRET=tu-secreto-cron
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 🚀 Despliegue en Vercel
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Sube el código al repositorio de GitHub: `theindustrialdepotmarketing-del/industrial-depot-analytics`.
+2. Conecta el repositorio en Vercel.
+3. Habilita **Vercel OIDC** en las configuraciones del proyecto en Vercel.
+4. Configura las variables de entorno.
+5. El despliegue automático generará la conexión OIDC segura con Google Cloud.

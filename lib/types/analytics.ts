@@ -14,6 +14,8 @@ export const GA4MetricName = {
   AVERAGE_SESSION_DURATION: "averageSessionDuration",
   SCREEN_PAGE_VIEWS: "screenPageViews",
   SESSIONS_PER_USER: "sessionsPerUser",
+  KEY_EVENTS: "keyEvents",
+  SESSION_KEY_EVENT_RATE: "sessionKeyEventRate",
 } as const;
 
 /* ─── Overview Metrics ─── */
@@ -29,6 +31,51 @@ export const OverviewMetricsSchema = z.object({
   period: z.string(),
 });
 export type OverviewMetrics = z.infer<typeof OverviewMetricsSchema>;
+
+/* ─── GA4 Test Report Types & Schemas ─── */
+export const GA4ReportRowSchema = z.object({
+  date: z.string(),
+  activeUsers: z.number(),
+  newUsers: z.number(),
+  sessions: z.number(),
+  engagedSessions: z.number(),
+  engagementRate: z.number(),
+  averageSessionDuration: z.number(),
+  keyEvents: z.number(),
+  sessionKeyEventRate: z.number(),
+  totalRevenue: z.number(),
+});
+export type GA4ReportRow = z.infer<typeof GA4ReportRowSchema>;
+
+export const GA4SummaryMetricsSchema = z.object({
+  activeUsers: z.number(),
+  newUsers: z.number(),
+  sessions: z.number(),
+  engagedSessions: z.number(),
+  engagementRate: z.number(),
+  averageSessionDuration: z.number(),
+  keyEvents: z.number(),
+  sessionKeyEventRate: z.number(),
+  totalRevenue: z.number(),
+});
+export type GA4SummaryMetrics = z.infer<typeof GA4SummaryMetricsSchema>;
+
+export const TestGA4ResponseSchema = z.object({
+  success: z.boolean(),
+  propertyId: z.string(),
+  period: z.object({
+    startDate: z.string(),
+    endDate: z.string(),
+    description: z.string(),
+  }),
+  rowCount: z.number(),
+  summary: GA4SummaryMetricsSchema,
+  rows: z.array(GA4ReportRowSchema),
+  timestamp: z.string(),
+  isLocalEnv: z.boolean().optional(),
+  message: z.string().optional(),
+});
+export type TestGA4Response = z.infer<typeof TestGA4ResponseSchema>;
 
 /* ─── Acquisition / Channel ─── */
 export const ChannelDataSchema = z.object({
