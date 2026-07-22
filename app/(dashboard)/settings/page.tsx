@@ -134,9 +134,11 @@ export default function SettingsPage() {
   const [testResult, setTestResult] = useState<TestGA4Response | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
 
+  // Dynamic connection state: true when test succeed in Vercel environment
+  const isGa4Connected = Boolean(testResult?.success && !testResult?.isLocalEnv);
+
   const handleTestConnection = async () => {
     setTesting(true);
-    setTestResult(null);
     setTestError(null);
 
     try {
@@ -145,11 +147,12 @@ export default function SettingsPage() {
 
       if (!res.ok && !data.isLocalEnv) {
         setTestError(data.message || `Error consultando GA4 (${res.status})`);
-        if (data.diagnostics) {
-          setTestResult(data);
-        }
+        setTestResult(null); // Reset connected status on error
       } else {
         setTestResult(data);
+        if (!data.success && !data.isLocalEnv) {
+          setTestResult(null);
+        }
       }
     } catch (err: unknown) {
       setTestError(
@@ -157,6 +160,7 @@ export default function SettingsPage() {
           ? err.message
           : "Error de red al intentar conectar con el servidor"
       );
+      setTestResult(null);
     } finally {
       setTesting(false);
     }
@@ -176,19 +180,19 @@ export default function SettingsPage() {
             label="Propiedad GA4"
             desc="ID de la propiedad de Google Analytics 4"
             value="properties/502218884"
-            connected={false}
+            connected={isGa4Connected}
           />
           <SettingRow
             label="Autenticación"
             desc="Vercel OIDC + Google Workload Identity Federation (WIF)"
             value="Pool: vercel"
-            connected={false}
+            connected={isGa4Connected}
           />
           <SettingRow
             label="Service Account"
             desc="Cuenta de servicio impersonada"
             value="ga4-dashboard-reader@..."
-            connected={false}
+            connected={isGa4Connected}
           />
 
           <div

@@ -159,7 +159,7 @@ async function getGA4ClientWithDiagnostics(): Promise<{
 }
 
 /**
- * Runs the overview report for the last 7 days from GA4 property properties/502218884.
+ * Runs the overview report for the last 7 full days (7daysAgo to yesterday) from GA4 property properties/502218884.
  */
 export async function runOverviewReport(
   propertyId: string = DEFAULT_PROPERTY_ID
@@ -176,7 +176,7 @@ export async function runOverviewReport(
       dateRanges: [
         {
           startDate: "7daysAgo",
-          endDate: "today",
+          endDate: "yesterday",
         },
       ],
       dimensions: [
@@ -262,8 +262,8 @@ export async function runOverviewReport(
       propertyId: formattedProperty,
       period: {
         startDate: "7daysAgo",
-        endDate: "today",
-        description: "Últimos 7 días",
+        endDate: "yesterday",
+        description: "Últimos 7 días (completos)",
       },
       rowCount,
       summary,
