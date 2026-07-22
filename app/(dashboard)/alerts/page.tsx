@@ -8,14 +8,18 @@ import {
   CheckCircle2,
   PlusCircle,
   Filter,
+  XCircle,
+  ArrowUpRight,
+  ArrowDownRight,
+  Minus,
 } from "lucide-react";
-import type { Alert } from "@/lib/types/database";
+import type { Alert, AlertEvidence } from "@/lib/types/database";
 
 export default function AlertsPage() {
   const [loading, setLoading] = useState(true);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [filterSeverity, setFilterSeverity] = useState<string>("all");
-  const [filterStatus, setFilterStatus] = useState<string>("pending");
+  const [filterStatus, setFilterStatus] = useState<string>("active");
   const [actioningId, setActioningId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -40,17 +44,17 @@ export default function AlertsPage() {
     };
   }, []);
 
-  const handleResolveAlert = async (id: string, isResolved: boolean) => {
+  const handleUpdateStatus = async (id: string, newStatus: "open" | "reviewing" | "resolved" | "dismissed") => {
     setActioningId(id);
     try {
       const res = await fetch("/api/analytics/alerts", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, is_resolved: isResolved }),
+        body: JSON.stringify({ id, status: newStatus }),
       });
       if (res.ok) {
         setAlerts((prev) =>
-          prev.map((a) => (a.id === id ? { ...a, is_resolved: isResolved } : a))
+          prev.map((a) => (a.id === id ? { ...a, status: newStatus } : a))
         );
       }
     } catch {
@@ -62,16 +66,18 @@ export default function AlertsPage() {
 
   const handleCreateTaskFromAlert = async (alertItem: Alert) => {
     setActioningId(alertItem.id || null);
+    const evidence = (alertItem.evidence || {}) as AlertEvidence;
+
     try {
       const res = await fetch("/api/analytics/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: `[Alerta ${alertItem.severity?.toUpperCase()}] ${alertItem.title}`,
-          description: alertItem.description,
+          description: evidence.proposedAction || alertItem.description,
           category: alertItem.category || "alert",
           priority: alertItem.severity || "medium",
-          target_metric: alertItem.metric,
+          target_metric: evidence.targetMetric,
         }),
       });
       if (res.ok) {
@@ -85,8 +91,14 @@ export default function AlertsPage() {
   };
 
   const filteredAlerts = alerts.filter((a) => {
-    if (filterStatus === "pending" && a.is_resolved) return false;
-    if (filterStatus === "resolved" && !a.is_resolved) return false;
+    if (filterStatus === "active") {
+      if (a.status !== "open" && a.status !== "reviewing") return false;
+    } else if (filterStatus === "resolved") {
+      if (a.status !== "resolved") return false;
+    } else if (filterStatus === "dismissed") {
+      if (a.status !== "dismissed") return false;
+    }
+
     if (filterSeverity !== "all" && a.severity !== filterSeverity) return false;
     return true;
   });
@@ -131,8 +143,9 @@ export default function AlertsPage() {
           onChange={(e) => setFilterStatus(e.target.value)}
           style={{ background: "#0f172a", color: "#f1f5f9", border: "1px solid var(--border-color)", borderRadius: "6px", padding: "0.35rem 0.75rem", fontSize: "0.8rem" }}
         >
-          <option value="pending">Pendientes / Activas</option>
-          <option value="resolved">Resueltas</option>
+          <option value="active">Pendientes / Activas (open, reviewing)</option>
+          <option value="resolved">Resueltas (resolved)</option>
+          <option value="dismissed">Descartadas (dismissed)</option>
           <option value="all">Todas</option>
         </select>
 
@@ -146,6 +159,7 @@ export default function AlertsPage() {
           <option value="high">High</option>
           <option value="medium">Medium</option>
           <option value="low">Low</option>
+          <option value="info">Info</option>
         </select>
       </div>
 
@@ -154,30 +168,33 @@ export default function AlertsPage() {
         <EmptyState
           icon={CheckCircle2}
           title="No hay alertas registradas"
-          description="Todas las alertas han sido resueltas o no hay problemas en esta categoría."
+          description="Todas las alertas han sido procesadas o no hay hallazgos con este filtro."
           variant="compact"
         />
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
           {filteredAlerts.map((alertItem) => {
             const badge = getSeverityBadge(alertItem.severity || "medium");
             const isProcessing = actioningId === alertItem.id;
+            const evidence = (alertItem.evidence || {}) as AlertEvidence;
+            const isInactive = alertItem.status === "resolved" || alertItem.status === "dismissed";
 
             return (
               <div
                 key={alertItem.id}
                 style={{
                   background: "var(--bg-card)",
-                  border: alertItem.is_resolved ? "1px solid var(--border-color)" : `1px solid ${badge.color}40`,
+                  border: isInactive ? "1px solid var(--border-color)" : `1px solid ${badge.color}40`,
                   borderRadius: "12px",
-                  padding: "1.25rem",
+                  padding: "1.5rem",
                   display: "flex",
                   flexDirection: "column",
-                  gap: "0.75rem",
+                  gap: "1rem",
                 }}
               >
+                {/* Header Row: Severidad, Categoría, Estado & Actions */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "1rem", flexWrap: "wrap" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
                     <span
                       style={{
                         background: badge.bg,
@@ -192,9 +209,36 @@ export default function AlertsPage() {
                     >
                       {alertItem.severity}
                     </span>
-                    <h3 style={{ fontSize: "0.95rem", fontWeight: 700, color: alertItem.is_resolved ? "#94a3b8" : "#f1f5f9", margin: 0, textDecoration: alertItem.is_resolved ? "line-through" : "none" }}>
-                      {alertItem.title}
-                    </h3>
+
+                    <span
+                      style={{
+                        background: "rgba(148, 163, 184, 0.12)",
+                        color: "#94a3b8",
+                        border: "1px solid var(--border-color)",
+                        padding: "0.2rem 0.5rem",
+                        borderRadius: "6px",
+                        fontSize: "0.7rem",
+                        fontWeight: 600,
+                        textTransform: "capitalize",
+                      }}
+                    >
+                      {alertItem.category}
+                    </span>
+
+                    <span
+                      style={{
+                        fontSize: "0.7rem",
+                        color: alertItem.status === "resolved" ? "#22c55e" : alertItem.status === "dismissed" ? "#64748b" : "#1e9bd7",
+                        fontWeight: 700,
+                        textTransform: "uppercase",
+                        background: "rgba(15, 23, 42, 0.6)",
+                        padding: "0.2rem 0.5rem",
+                        borderRadius: "4px",
+                        border: "1px solid var(--border-color)",
+                      }}
+                    >
+                      Estado: {alertItem.status}
+                    </span>
                   </div>
 
                   <div style={{ display: "flex", gap: "0.5rem" }}>
@@ -219,36 +263,147 @@ export default function AlertsPage() {
                       Crear Tarea
                     </button>
 
-                    <button
-                      onClick={() => handleResolveAlert(alertItem.id!, !alertItem.is_resolved)}
-                      disabled={isProcessing}
-                      style={{
-                        background: alertItem.is_resolved ? "rgba(148, 163, 184, 0.12)" : "rgba(34, 197, 94, 0.12)",
-                        color: alertItem.is_resolved ? "#94a3b8" : "#22c55e",
-                        border: alertItem.is_resolved ? "1px solid rgba(148, 163, 184, 0.3)" : "1px solid rgba(34, 197, 94, 0.3)",
-                        padding: "0.35rem 0.75rem",
-                        borderRadius: "6px",
-                        fontSize: "0.75rem",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "0.35rem",
-                      }}
-                    >
-                      <CheckCircle2 size={14} />
-                      {alertItem.is_resolved ? "Marcar Pendiente" : "Marcar Resuelta"}
-                    </button>
+                    {alertItem.status !== "resolved" ? (
+                      <button
+                        onClick={() => handleUpdateStatus(alertItem.id!, "resolved")}
+                        disabled={isProcessing}
+                        style={{
+                          background: "rgba(34, 197, 94, 0.12)",
+                          color: "#22c55e",
+                          border: "1px solid rgba(34, 197, 94, 0.3)",
+                          padding: "0.35rem 0.75rem",
+                          borderRadius: "6px",
+                          fontSize: "0.75rem",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "0.35rem",
+                        }}
+                      >
+                        <CheckCircle2 size={14} />
+                        Resolver
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleUpdateStatus(alertItem.id!, "open")}
+                        disabled={isProcessing}
+                        style={{
+                          background: "rgba(148, 163, 184, 0.12)",
+                          color: "#94a3b8",
+                          border: "1px solid var(--border-color)",
+                          padding: "0.35rem 0.75rem",
+                          borderRadius: "6px",
+                          fontSize: "0.75rem",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Reabrir
+                      </button>
+                    )}
+
+                    {alertItem.status !== "dismissed" && (
+                      <button
+                        onClick={() => handleUpdateStatus(alertItem.id!, "dismissed")}
+                        disabled={isProcessing}
+                        style={{
+                          background: "transparent",
+                          color: "#64748b",
+                          border: "1px solid var(--border-color)",
+                          padding: "0.35rem 0.6rem",
+                          borderRadius: "6px",
+                          fontSize: "0.75rem",
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "0.25rem",
+                        }}
+                        title="Descartar"
+                      >
+                        <XCircle size={14} />
+                        Descartar
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                <p style={{ fontSize: "0.825rem", color: "#94a3b8", margin: 0, lineHeight: 1.5 }}>
-                  {alertItem.description}
-                </p>
+                {/* Title & Description */}
+                <div>
+                  <h3 style={{ fontSize: "1.05rem", fontWeight: 700, color: isInactive ? "#94a3b8" : "#f1f5f9", margin: 0, textDecoration: isInactive ? "line-through" : "none" }}>
+                    {alertItem.title}
+                  </h3>
+                  <p style={{ fontSize: "0.85rem", color: "#94a3b8", marginTop: "0.35rem", margin: "0.35rem 0 0", lineHeight: 1.5 }}>
+                    {alertItem.description}
+                  </p>
+                </div>
 
-                {alertItem.proposed_action && (
-                  <div style={{ background: "rgba(15, 23, 42, 0.6)", padding: "0.6rem 0.85rem", borderRadius: "6px", fontSize: "0.78rem", color: "#1e9bd7", border: "1px solid var(--border-color)" }}>
-                    <strong>Acción Recomendada:</strong> {alertItem.proposed_action}
+                {/* Evidence Metrics Grid (Requisito 17) */}
+                <div
+                  style={{
+                    background: "rgba(15, 23, 42, 0.6)",
+                    border: "1px solid var(--border-color)",
+                    borderRadius: "8px",
+                    padding: "0.875rem 1rem",
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: "0.75rem",
+                    fontSize: "0.78rem",
+                  }}
+                >
+                  {evidence.affectedEntity && (
+                    <div>
+                      <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Entidad Afectada</div>
+                      <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.15rem" }}>{evidence.affectedEntity}</div>
+                    </div>
+                  )}
+
+                  {(evidence.currentValue !== undefined || evidence.previousValue !== undefined) && (
+                    <div>
+                      <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Valores (Actual / Prev)</div>
+                      <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.15rem" }}>
+                        {evidence.currentValue !== undefined && evidence.currentValue !== null ? String(evidence.currentValue) : "N/A"} / {evidence.previousValue !== undefined && evidence.previousValue !== null ? String(evidence.previousValue) : "N/A"}
+                      </div>
+                    </div>
+                  )}
+
+                  {evidence.percentageChange !== undefined && evidence.percentageChange !== null && (
+                    <div>
+                      <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Variación Porcentual</div>
+                      <div style={{
+                        color: Number(evidence.percentageChange) > 0 ? "#22c55e" : Number(evidence.percentageChange) < 0 ? "#ef4444" : "#94a3b8",
+                        fontWeight: 700,
+                        marginTop: "0.15rem",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "0.2rem",
+                      }}>
+                        {Number(evidence.percentageChange) > 0 ? <ArrowUpRight size={13} /> : Number(evidence.percentageChange) < 0 ? <ArrowDownRight size={13} /> : <Minus size={13} />}
+                        {evidence.percentageChange}%
+                      </div>
+                    </div>
+                  )}
+
+                  {evidence.targetMetric && (
+                    <div>
+                      <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Métrica Objetivo</div>
+                      <div style={{ color: "#1e9bd7", fontWeight: 600, marginTop: "0.15rem" }}>{evidence.targetMetric}</div>
+                    </div>
+                  )}
+
+                  <div>
+                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Fecha Registrada</div>
+                    <div style={{ color: "#94a3b8", marginTop: "0.15rem" }}>
+                      {alertItem.alert_date || (alertItem.created_at ? new Date(alertItem.created_at).toLocaleDateString("es-ES") : "Sin fecha")}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Proposed Action */}
+                {evidence.proposedAction && (
+                  <div style={{ background: "rgba(30, 155, 215, 0.08)", padding: "0.75rem 1rem", borderRadius: "8px", fontSize: "0.8rem", border: "1px solid rgba(30, 155, 215, 0.25)" }}>
+                    <strong style={{ color: "#1e9bd7" }}>Acción Propuesta:</strong>{" "}
+                    <span style={{ color: "#cbd5e1" }}>{evidence.proposedAction}</span>
                   </div>
                 )}
               </div>

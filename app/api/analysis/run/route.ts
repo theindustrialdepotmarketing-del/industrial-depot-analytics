@@ -30,22 +30,32 @@ export async function POST(request: NextRequest) {
     const period: PeriodKey = (body.period as PeriodKey) || "30d";
 
     const report = await runDiagnosticEngine(period);
+    const stats = report.persistenceStats;
+
+    const isSuccess = stats.alertsFailed === 0;
 
     return NextResponse.json(
       {
-        success: true,
+        success: isSuccess,
         period: report.period,
+        findingsGenerated: stats.findingsGenerated,
+        alertsAttempted: stats.alertsAttempted,
+        alertsCreated: stats.alertsCreated,
+        alertsUpdated: stats.alertsUpdated,
+        alertsFailed: stats.alertsFailed,
+        recommendationsCreated: stats.recommendationsCreated,
+        tasksCreated: stats.tasksCreated,
         healthScore: report.healthBreakdown,
-        findingsCount: report.findings.length,
-        campaignsAnalyzed: report.campaignClassifications.length,
-        findings: report.findings,
-        timestamp: new Date().toISOString(),
-        message: "Análisis determinístico completado exitosamente.",
+        message: isSuccess
+          ? "Análisis determinístico completado exitosamente y alertas guardadas en Supabase."
+          : `Análisis completado con ${stats.alertsFailed} errores de persistencia en Supabase.`,
       },
-      { status: 200 }
+      { status: isSuccess ? 200 : 207 }
     );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Error ejecutando análisis de diagnóstico";
+    console.error("[POST /api/analysis/run Error]", { message });
+
     return NextResponse.json(
       {
         success: false,

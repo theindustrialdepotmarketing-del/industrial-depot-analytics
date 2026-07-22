@@ -11,7 +11,7 @@ import {
   ANALYTICS_THRESHOLDS,
   type DiagnosticFinding,
 } from "@/lib/analytics/thresholds";
-import type { Alert, Recommendation, Task } from "@/lib/types/database";
+
 
 export interface CampaignClassification {
   campaignName: string;
@@ -40,6 +40,16 @@ export interface HealthScoreBreakdown {
   totalScore: number;      // max 100
   status: "Saludable" | "Requiere atención" | "Crítico";
   color: string;
+}
+
+export interface PersistenceStats {
+  findingsGenerated: number;
+  alertsAttempted: number;
+  alertsCreated: number;
+  alertsUpdated: number;
+  alertsFailed: number;
+  recommendationsCreated: number;
+  tasksCreated: number;
 }
 
 /**
@@ -232,7 +242,7 @@ export async function runDiagnosticEngine(period: PeriodKey = "30d") {
       evidence: `Sesiones Direct: ${directSessions.toLocaleString()} de ${totalSessionsAcquisition.toLocaleString()} totales (${(directRatio * 100).toFixed(1)}%).`,
       currentValue: directRatio,
       affectedEntity: "Atribución de Canales",
-      proposedAction: "Implementar parámetros UTM estrictos en campañas de email marketing, PDF interactivos y enlaces externos.",
+      proposedAction: "Implementar parámetros UTM strictly en campañas de email marketing, PDF interactivos y enlaces externos.",
       targetMetric: "direct_ratio",
     });
   }
@@ -416,8 +426,8 @@ export async function runDiagnosticEngine(period: PeriodKey = "30d") {
     };
   });
 
-  // ─── 9. PERSISTENCE TO SUPABASE ───
-  await persistDiagnosticsToSupabase(findings);
+  // ─── 9. PERSISTENCE TO SUPABASE WITH EXACT SCHEMA & DEDUPLICATION ───
+  const persistenceStats = await persistDiagnosticsToSupabase(findings, period);
 
   return {
     period,
@@ -425,6 +435,7 @@ export async function runDiagnosticEngine(period: PeriodKey = "30d") {
     findings,
     campaignClassifications,
     overview,
+    persistenceStats,
   };
 }
 
@@ -433,102 +444,227 @@ function kpisConversionRate(overview: { kpis: { sessionKeyEventRate: { value: nu
 }
 
 /**
- * Persists diagnostic findings to Supabase (alerts, recommendations, tasks).
- * Idempotent via fingerprint deduplication.
+ * Persists diagnostic findings to Supabase `public.alerts`, `public.recommendations`, `public.tasks`.
+ * STRICTLY complies with public.alerts database schema:
+ * - id, company_id, alert_date, category, severity, title, description, evidence (JSONB), status ('open'), signature
+ * - NO nonexistent columns (e.g. affected_entity, current_value, proposed_action)
+ * - Safe logging with count of findings, inserts, updates, and Supabase error codes (NO secrets or tokens).
  */
-async function persistDiagnosticsToSupabase(findings: DiagnosticFinding[]) {
+async function persistDiagnosticsToSupabase(
+  findings: DiagnosticFinding[],
+  period: PeriodKey
+): Promise<PersistenceStats> {
+  const stats: PersistenceStats = {
+    findingsGenerated: findings.length,
+    alertsAttempted: 0,
+    alertsCreated: 0,
+    alertsUpdated: 0,
+    alertsFailed: 0,
+    recommendationsCreated: 0,
+    tasksCreated: 0,
+  };
+
   const supabase = getSupabaseServerClient();
-  if (!supabase) return;
+  if (!supabase) {
+    console.error("[Supabase Error] Server client is null.");
+    stats.alertsFailed = findings.length;
+    return stats;
+  }
+
+  // 1. Fetch company_id for property "502218884"
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: company, error: companyError } = await (supabase as any)
+    .from("companies")
+    .select("id")
+    .eq("ga4_property_id", "502218884")
+    .maybeSingle();
+
+  if (companyError || !company?.id) {
+    console.error("[Supabase Company Lookup Error]", {
+      code: companyError?.code || "COMPANY_NOT_FOUND",
+      message: companyError?.message || "No company found for property 502218884",
+    });
+    stats.alertsFailed = findings.length;
+    return stats;
+  }
+
+  const companyId: string = company.id;
+  const alertDate = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
 
   for (const finding of findings) {
-    if (finding.severity === "info" || finding.severity === "low") continue;
+    // Only attempt alerts for actionable findings (ignore plain info if desired, or persist all)
+    stats.alertsAttempted++;
+
+    const ruleId = finding.id;
+    const affectedEntity = finding.affectedEntity || "Sitio Web Completo";
+    const category = finding.category;
+
+    // Deduplication signature: ruleId + affectedEntity + category
+    const signature = `${ruleId}:${affectedEntity}:${category}`;
+
+    const evidenceJson = {
+      ruleId,
+      affectedEntity,
+      currentValue: finding.currentValue ?? null,
+      previousValue: finding.previousValue ?? null,
+      percentageChange: finding.percentageChange ?? null,
+      proposedAction: finding.proposedAction || "",
+      targetMetric: finding.targetMetric || "",
+      period,
+    };
 
     try {
-      // 1. Check if alert with same fingerprint exists
+      // 2. Check if an active alert ('open', 'reviewing') with the same company_id and signature exists
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: existingAlert } = await (supabase as any)
+      const { data: existingAlert, error: selectErr } = await (supabase as any)
         .from("alerts")
         .select("id")
-        .eq("fingerprint", finding.fingerprint)
-        .eq("is_resolved", false)
+        .eq("company_id", companyId)
+        .eq("signature", signature)
+        .in("status", ["open", "reviewing"])
         .maybeSingle();
+
+      if (selectErr) {
+        console.error("[Supabase Select Alert Error]", {
+          code: selectErr.code,
+          message: selectErr.message,
+        });
+      }
 
       let alertId = existingAlert?.id;
 
-      if (!alertId) {
-        // Insert new Alert
+      if (alertId) {
+        // UPDATE existing active alert
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: newAlert } = await (supabase as any)
+        const { error: updateErr } = await (supabase as any)
           .from("alerts")
-          .insert({
-            fingerprint: finding.fingerprint,
-            category: finding.category,
+          .update({
+            alert_date: alertDate,
+            severity: finding.severity,
             title: finding.title,
             description: finding.description,
+            evidence: evidenceJson,
+          })
+          .eq("id", alertId);
+
+        if (updateErr) {
+          console.error("[Supabase Update Alert Error]", {
+            code: updateErr.code,
+            message: updateErr.message,
+          });
+          stats.alertsFailed++;
+        } else {
+          stats.alertsUpdated++;
+        }
+      } else {
+        // INSERT new alert
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: newAlert, error: insertErr } = await (supabase as any)
+          .from("alerts")
+          .insert({
+            company_id: companyId,
+            alert_date: alertDate,
+            category: finding.category,
             severity: finding.severity,
-            metric: finding.targetMetric,
-            current_value: finding.currentValue,
-            previous_value: finding.previousValue,
-            percentage_change: finding.percentageChange,
-            affected_entity: finding.affectedEntity,
-            proposed_action: finding.proposedAction,
-            is_read: false,
-            is_resolved: false,
+            title: finding.title,
+            description: finding.description,
+            evidence: evidenceJson,
+            signature: signature,
+            status: "open",
             created_at: new Date().toISOString(),
-          } as unknown as Partial<Alert>)
+          })
           .select("id")
           .single();
 
-        alertId = newAlert?.id;
-      }
-
-      if (alertId) {
-        // Insert or update Recommendation
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: recData } = await (supabase as any)
-          .from("recommendations")
-          .insert({
-            alert_id: alertId,
-            title: finding.title,
-            problem: finding.description,
-            evidence: finding.evidence,
-            proposed_action: finding.proposedAction,
-            expected_impact: "Mejora en rendimiento y recuperación de conversión",
-            priority: finding.severity,
-            target_metric: finding.targetMetric,
-            status: "pending",
-          } as unknown as Partial<Recommendation>)
-          .select("id")
-          .maybeSingle();
-
-        const recId = recData?.id;
-
-        // Auto-create Task for HIGH or CRITICAL severity
-        if (finding.severity === "high" || finding.severity === "critical") {
-          let dueDays = 3;
-          if (finding.severity === "critical") dueDays = 1;
-
-          const dueDateObj = new Date();
-          dueDateObj.setUTCDate(dueDateObj.getUTCDate() + dueDays);
-
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await (supabase as any)
-            .from("tasks")
-            .insert({
-              recommendation_id: recId,
-              title: `[Prioridad ${finding.severity.toUpperCase()}] ${finding.title}`,
-              description: finding.proposedAction,
-              category: finding.category,
-              status: "pending",
-              priority: finding.severity,
-              due_date: dueDateObj.toISOString(),
-              target_metric: finding.targetMetric,
-              tags: [finding.category, "auto-generated"],
-            } as unknown as Partial<Task>);
+        if (insertErr || !newAlert?.id) {
+          console.error("[Supabase Insert Alert Error]", {
+            code: insertErr?.code || "INSERT_FAILED",
+            message: insertErr?.message || "Failed inserting alert record",
+          });
+          stats.alertsFailed++;
+        } else {
+          alertId = newAlert.id;
+          stats.alertsCreated++;
         }
       }
-    } catch (err) {
-      console.error("[Diagnostic Engine Persistence Error]:", err);
+
+      // If alert was created/updated, handle Recommendation & Task
+      if (alertId) {
+        // Create Recommendation if not info severity
+        if (finding.severity !== "info") {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const { data: recData, error: recErr } = await (supabase as any)
+            .from("recommendations")
+            .insert({
+              alert_id: alertId,
+              title: finding.title,
+              problem: finding.description,
+              evidence: finding.evidence,
+              proposed_action: finding.proposedAction,
+              expected_impact: "Mejora en rendimiento y optimización de conversión",
+              priority: finding.severity === "critical" || finding.severity === "high" ? finding.severity : "medium",
+              target_metric: finding.targetMetric,
+              status: "pending",
+              created_at: new Date().toISOString(),
+            })
+            .select("id")
+            .maybeSingle();
+
+          if (!recErr && recData?.id) {
+            stats.recommendationsCreated++;
+
+            // Auto-create Task for HIGH or CRITICAL severity
+            if (finding.severity === "high" || finding.severity === "critical") {
+              let dueDays = 3;
+              if (finding.severity === "critical") dueDays = 1;
+
+              const dueDateObj = new Date();
+              dueDateObj.setUTCDate(dueDateObj.getUTCDate() + dueDays);
+
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const { error: taskErr } = await (supabase as any)
+                .from("tasks")
+                .insert({
+                  recommendation_id: recData.id,
+                  title: `[Prioridad ${finding.severity.toUpperCase()}] ${finding.title}`,
+                  description: finding.proposedAction,
+                  category: finding.category,
+                  status: "pending",
+                  priority: finding.severity,
+                  due_date: dueDateObj.toISOString(),
+                  target_metric: finding.targetMetric,
+                  tags: [finding.category, "auto-generated"],
+                  created_at: new Date().toISOString(),
+                });
+
+              if (!taskErr) {
+                stats.tasksCreated++;
+              } else {
+                console.error("[Supabase Task Insert Error]", { code: taskErr.code, message: taskErr.message });
+              }
+            }
+          } else if (recErr) {
+            console.error("[Supabase Recommendation Insert Error]", { code: recErr.code, message: recErr.message });
+          }
+        }
+      }
+    } catch (err: unknown) {
+      stats.alertsFailed++;
+      const message = err instanceof Error ? err.message : "Error inesperado al procesar alerta";
+      console.error("[Supabase Process Alert Exception]", { message });
     }
   }
+
+  // Safe summary log (NO tokens, NO secrets)
+  console.log("[Diagnostic Engine Persistence Summary]", {
+    findingsGenerated: stats.findingsGenerated,
+    alertsAttempted: stats.alertsAttempted,
+    alertsCreated: stats.alertsCreated,
+    alertsUpdated: stats.alertsUpdated,
+    alertsFailed: stats.alertsFailed,
+    recommendationsCreated: stats.recommendationsCreated,
+    tasksCreated: stats.tasksCreated,
+  });
+
+  return stats;
 }

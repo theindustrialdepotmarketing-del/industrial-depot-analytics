@@ -1,8 +1,17 @@
 import { auth } from "@/lib/auth";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import type { Alert } from "@/lib/types/database";
 
 export const runtime = "nodejs";
+
+const SEVERITY_WEIGHTS: Record<string, number> = {
+  critical: 4,
+  high: 3,
+  medium: 2,
+  low: 1,
+  info: 0,
+};
 
 export async function GET() {
   const session = await auth();
@@ -20,15 +29,30 @@ export async function GET() {
   }
 
   try {
-    const { data: alertsData } = await supabase
+    const { data: alertsData, error } = await supabase
       .from("alerts")
       .select("*")
       .order("created_at", { ascending: false });
 
+    if (error) {
+      console.error("[GET /api/analytics/alerts Error]", { code: error.code, message: error.message });
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    }
+
+    const rawAlerts = (alertsData || []) as Alert[];
+
+    // Sort by severity rank (critical > high > medium > low > info) and then by created_at desc
+    const sortedAlerts = [...rawAlerts].sort((a, b) => {
+      const wA = SEVERITY_WEIGHTS[a.severity] ?? 0;
+      const wB = SEVERITY_WEIGHTS[b.severity] ?? 0;
+      if (wB !== wA) return wB - wA;
+      return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+    });
+
     return NextResponse.json(
       {
         success: true,
-        alerts: alertsData || [],
+        alerts: sortedAlerts,
       },
       { status: 200 }
     );
@@ -52,28 +76,31 @@ export async function PATCH(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { id, is_resolved, is_read } = body;
+    const { id, status } = body;
 
-    if (!id) {
-      return NextResponse.json({ success: false, message: "ID de alerta requerido" }, { status: 400 });
+    if (!id || !status) {
+      return NextResponse.json({ success: false, message: "ID y estado requeridos" }, { status: 400 });
     }
 
-    const updates: Record<string, unknown> = {};
-    if (typeof is_resolved === "boolean") {
-      updates.is_resolved = is_resolved;
-      if (is_resolved) updates.resolved_at = new Date().toISOString();
-    }
-    if (typeof is_read === "boolean") {
-      updates.is_read = is_read;
+    const updates: Record<string, unknown> = {
+      status,
+    };
+    if (status === "resolved") {
+      updates.resolved_at = new Date().toISOString();
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: updatedAlert } = await (supabase as any)
+    const { data: updatedAlert, error } = await (supabase as any)
       .from("alerts")
       .update(updates)
       .eq("id", id)
       .select("*")
       .single();
+
+    if (error) {
+      console.error("[PATCH /api/analytics/alerts Error]", { code: error.code, message: error.message });
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    }
 
     return NextResponse.json({ success: true, alert: updatedAlert }, { status: 200 });
   } catch (err: unknown) {

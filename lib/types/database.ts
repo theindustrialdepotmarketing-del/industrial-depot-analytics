@@ -175,22 +175,32 @@ export type SyncResult = z.infer<typeof SyncResultSchema>;
 export const AlertSeverityEnum = z.enum(["info", "low", "medium", "high", "critical"] as [string, ...string[]]);
 export type AlertSeverity = z.infer<typeof AlertSeverityEnum>;
 
+export const AlertStatusEnum = z.enum(["open", "reviewing", "resolved", "dismissed"] as [string, ...string[]]);
+export type AlertStatus = z.infer<typeof AlertStatusEnum>;
+
+export interface AlertEvidence {
+  ruleId?: string;
+  affectedEntity?: string;
+  currentValue?: number | null;
+  previousValue?: number | null;
+  percentageChange?: number | null;
+  proposedAction?: string;
+  targetMetric?: string;
+  period?: string;
+  [key: string]: unknown;
+}
+
 export const AlertSchema = z.object({
   id: z.string().optional(),
-  fingerprint: z.string().optional(),
-  category: z.string().optional(),
+  company_id: z.string().optional(),
+  alert_date: z.string().optional(),
+  category: z.string(),
+  severity: AlertSeverityEnum,
   title: z.string(),
   description: z.string(),
-  severity: AlertSeverityEnum,
-  metric: z.string().optional(),
-  threshold: z.number().optional(),
-  current_value: z.number().optional(),
-  previous_value: z.number().optional(),
-  percentage_change: z.number().optional(),
-  affected_entity: z.string().optional(),
-  proposed_action: z.string().optional(),
-  is_read: z.boolean().optional(),
-  is_resolved: z.boolean().optional(),
+  evidence: z.record(z.string(), z.unknown()).optional(),
+  signature: z.string().optional(),
+  status: AlertStatusEnum,
   created_at: z.string().optional(),
   resolved_at: z.string().nullable().optional(),
 });
