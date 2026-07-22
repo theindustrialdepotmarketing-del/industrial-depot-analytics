@@ -47,7 +47,10 @@ export interface PersistenceStats {
   alertsCreated: number;
   alertsUpdated: number;
   alertsFailed: number;
+  recommendationsAttempted: number;
   recommendationsCreated: number;
+  recommendationsUpdated: number;
+  recommendationsFailed: number;
   tasksCreated: number;
 }
 
@@ -739,7 +742,10 @@ async function persistDiagnosticsToSupabase(
     alertsCreated: 0,
     alertsUpdated: 0,
     alertsFailed: 0,
+    recommendationsAttempted: 0,
     recommendationsCreated: 0,
+    recommendationsUpdated: 0,
+    recommendationsFailed: 0,
     tasksCreated: 0,
   };
 
@@ -864,68 +870,157 @@ async function persistDiagnosticsToSupabase(
         }
       }
 
-      // If alert was created/updated, handle Recommendation & Task
-      if (alertId) {
-        if (finding.severity !== "info") {
+      // ─── RECOMMENDATIONS PERSISTENCE & DEDUPLICATION (Requisitos 3, 4, 5, 6, 12, 13, 14, 15, 16) ───
+      if (finding.severity !== "info") {
+        stats.recommendationsAttempted++;
+
+        // Determine specific recommendation title, priority, and expected impact (Requisito 16)
+        let recTitle = finding.title;
+        let recPriority: "low" | "medium" | "high" | "critical" =
+          finding.severity === "critical" ? "critical" : finding.severity === "high" ? "high" : "medium";
+        let expectedImpact = "Mejora en rendimiento y optimización de conversión";
+
+        if (ruleId === "pages-404-critical") {
+          recTitle = "Auditar y corregir las URLs 404 con mayor tráfico";
+          recPriority = "critical";
+          expectedImpact = "Recuperación del tráfico perdido en páginas de destino y prevención de fugas en campañas pagadas.";
+        } else if (ruleId === "attribution-excessive-direct") {
+          recTitle = "Implementar y estandarizar parámetros UTM";
+          recPriority = "high";
+          expectedImpact = "Atribución precisa del canal real de origen y optimización del retorno publicitario.";
+        } else if (ruleId === "ecommerce-funnel-incomplete") {
+          recTitle = "Implementar eventos del embudo de comercio electrónico en GTM";
+          recPriority = "critical";
+          expectedImpact = "Medición precisa del embudo de compra y visibilidad del abandono de carrito.";
+        } else if (ruleId === "engagement-drop") {
+          recTitle = "Identificar los segmentos responsables de la caída de engagement";
+          recPriority = finding.severity === "high" || finding.severity === "critical" ? "high" : "medium";
+          expectedImpact = "Recuperación de la tasa de interacción y retención de usuarios.";
+        }
+
+        // Check for existing active recommendation by signature
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: existingRec, error: recSelectErr } = await (supabase as any)
+          .from("recommendations")
+          .select("id")
+          .eq("company_id", companyId)
+          .eq("signature", signature)
+          .in("status", ["pending", "in_progress"])
+          .maybeSingle();
+
+        if (recSelectErr) {
+          console.error("[Supabase Select Recommendation Error]", {
+            code: recSelectErr.code,
+            message: recSelectErr.message,
+          });
+        }
+
+        let recommendationId = existingRec?.id;
+
+        if (recommendationId) {
+          // UPDATE existing active recommendation (Requisito 14)
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const { data: recData, error: recErr } = await (supabase as any)
+          const { error: recUpdateErr } = await (supabase as any)
             .from("recommendations")
-            .insert({
-              alert_id: alertId,
-              title: finding.title,
+            .update({
+              alert_id: alertId || null,
+              recommendation_date: alertDate,
+              category: finding.category,
+              priority: recPriority,
+              title: recTitle,
+              description: finding.description,
               problem: finding.description,
               evidence: finding.evidence,
               proposed_action: finding.proposedAction,
-              expected_impact: "Mejora en rendimiento y optimización de conversión",
-              priority: finding.severity === "critical" || finding.severity === "high" ? finding.severity : "medium",
-              target_metric: finding.targetMetric,
+              action_steps: finding.proposedAction,
+              expected_impact: expectedImpact,
+              target_metric: finding.targetMetric || "",
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", recommendationId);
+
+          if (recUpdateErr) {
+            console.error("[Supabase Update Recommendation Error]", {
+              code: recUpdateErr.code,
+              message: recUpdateErr.message,
+            });
+            stats.recommendationsFailed++;
+          } else {
+            stats.recommendationsUpdated++;
+          }
+        } else {
+          // INSERT new recommendation with status = 'pending' (Requisitos 6, 15)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const { data: newRec, error: recInsertErr } = await (supabase as any)
+            .from("recommendations")
+            .insert({
+              company_id: companyId,
+              alert_id: alertId || null,
+              recommendation_date: alertDate,
+              category: finding.category,
+              priority: recPriority,
+              title: recTitle,
+              description: finding.description,
+              problem: finding.description,
+              evidence: finding.evidence,
+              proposed_action: finding.proposedAction,
+              action_steps: finding.proposedAction,
+              expected_impact: expectedImpact,
+              target_metric: finding.targetMetric || "",
+              signature: signature,
               status: "pending",
               created_at: new Date().toISOString(),
             })
             .select("id")
-            .maybeSingle();
+            .single();
 
-          if (!recErr && recData?.id) {
+          if (recInsertErr || !newRec?.id) {
+            console.error("[Supabase Insert Recommendation Error]", {
+              code: recInsertErr?.code || "REC_INSERT_FAILED",
+              message: recInsertErr?.message || "Failed inserting recommendation record",
+            });
+            stats.recommendationsFailed++;
+          } else {
+            recommendationId = newRec.id;
             stats.recommendationsCreated++;
+          }
+        }
 
-            if (finding.severity === "high" || finding.severity === "critical") {
-              let dueDays = 3;
-              if (finding.severity === "critical") dueDays = 1;
+        // Handle Task creation if priority is high or critical
+        if (recommendationId && (finding.severity === "high" || finding.severity === "critical")) {
+          let dueDays = 3;
+          if (finding.severity === "critical") dueDays = 1;
 
-              const dueDateObj = new Date();
-              dueDateObj.setUTCDate(dueDateObj.getUTCDate() + dueDays);
+          const dueDateObj = new Date();
+          dueDateObj.setUTCDate(dueDateObj.getUTCDate() + dueDays);
 
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const { error: taskErr } = await (supabase as any)
-                .from("tasks")
-                .insert({
-                  recommendation_id: recData.id,
-                  title: `[Prioridad ${finding.severity.toUpperCase()}] ${finding.title}`,
-                  description: finding.proposedAction,
-                  category: finding.category,
-                  status: "pending",
-                  priority: finding.severity,
-                  due_date: dueDateObj.toISOString(),
-                  target_metric: finding.targetMetric,
-                  tags: [finding.category, "auto-generated"],
-                  created_at: new Date().toISOString(),
-                });
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const { error: taskErr } = await (supabase as any)
+            .from("tasks")
+            .insert({
+              recommendation_id: recommendationId,
+              title: `[Prioridad ${finding.severity.toUpperCase()}] ${recTitle}`,
+              description: finding.proposedAction,
+              category: finding.category,
+              status: "pending",
+              priority: finding.severity,
+              due_date: dueDateObj.toISOString(),
+              target_metric: finding.targetMetric || "",
+              tags: [finding.category, "auto-generated"],
+              created_at: new Date().toISOString(),
+            });
 
-              if (!taskErr) {
-                stats.tasksCreated++;
-              } else {
-                console.error("[Supabase Task Insert Error]", { code: taskErr.code, message: taskErr.message });
-              }
-            }
-          } else if (recErr) {
-            console.error("[Supabase Recommendation Insert Error]", { code: recErr.code, message: recErr.message });
+          if (!taskErr) {
+            stats.tasksCreated++;
+          } else {
+            console.error("[Supabase Task Insert Error]", { code: taskErr.code, message: taskErr.message });
           }
         }
       }
     } catch (err: unknown) {
       stats.alertsFailed++;
-      const message = err instanceof Error ? err.message : "Error inesperado al procesar alerta";
-      console.error("[Supabase Process Alert Exception]", { message });
+      const message = err instanceof Error ? err.message : "Error inesperado al procesar diagnóstico";
+      console.error("[Supabase Process Diagnostic Exception]", { message });
     }
   }
 
@@ -936,9 +1031,13 @@ async function persistDiagnosticsToSupabase(
     alertsCreated: stats.alertsCreated,
     alertsUpdated: stats.alertsUpdated,
     alertsFailed: stats.alertsFailed,
+    recommendationsAttempted: stats.recommendationsAttempted,
     recommendationsCreated: stats.recommendationsCreated,
+    recommendationsUpdated: stats.recommendationsUpdated,
+    recommendationsFailed: stats.recommendationsFailed,
     tasksCreated: stats.tasksCreated,
   });
 
   return stats;
 }
+
