@@ -8,8 +8,8 @@ export const runtime = "nodejs";
 /**
  * GET /api/supabase/test
  * Protected administrative route to test Supabase database connection.
- * Searches for the company with ga4_property_id = "502218884" in the `companies` table.
- * Returns only normalized public fields — NEVER keys, tokens or secrets.
+ * Searches for the company with ga4_property_id = "502218884" in public.companies.
+ * Returns strictly normalized fields — NEVER keys, tokens, or internal Postgres traces.
  */
 export async function GET() {
   const session = await auth();
@@ -18,9 +18,8 @@ export async function GET() {
     return NextResponse.json(
       {
         success: false,
-        error: "UNAUTHORIZED",
-        message: "Se requiere sesión administrativa válida para probar la conexión con Supabase.",
         databaseConnected: false,
+        message: "Acceso no autorizado. Se requiere sesión administrativa.",
       },
       { status: 401 }
     );
@@ -32,10 +31,8 @@ export async function GET() {
     return NextResponse.json(
       {
         success: false,
-        error: "SUPABASE_NOT_CONFIGURED",
-        message:
-          "Supabase no está configurado. Define NEXT_PUBLIC_SUPABASE_URL y SUPABASE_SECRET_KEY en las variables de entorno de Vercel.",
         databaseConnected: false,
+        message: "Base de datos Supabase no configurada en las variables de entorno.",
       },
       { status: 200 }
     );
@@ -52,9 +49,8 @@ export async function GET() {
       return NextResponse.json(
         {
           success: false,
-          error: "QUERY_FAILED",
-          message: `Error consultando la tabla 'companies': ${error.message}`,
           databaseConnected: true,
+          message: "Error realizando la consulta en la tabla de empresas.",
         },
         { status: 400 }
       );
@@ -66,10 +62,8 @@ export async function GET() {
       return NextResponse.json(
         {
           success: false,
-          error: "COMPANY_NOT_FOUND",
-          message:
-            "Conexión con Supabase exitosa, pero no se encontró un registro en la tabla 'companies' con ga4_property_id = '502218884'.",
           databaseConnected: true,
+          message: "Conexión a la base de datos establecida, pero la empresa con Property ID 502218884 no fue encontrada.",
         },
         { status: 200 }
       );
@@ -78,21 +72,19 @@ export async function GET() {
     return NextResponse.json(
       {
         success: true,
+        databaseConnected: true,
         companyName: company.name,
         propertyId: company.ga4_property_id,
         timezone: company.timezone || "UTC",
-        databaseConnected: true,
       },
       { status: 200 }
     );
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Error desconocido de conexión";
+  } catch {
     return NextResponse.json(
       {
         success: false,
-        error: "SUPABASE_CONNECTION_ERROR",
-        message: `Error de conexión con Supabase: ${message}`,
         databaseConnected: false,
+        message: "Error de conexión con la base de datos de Supabase.",
       },
       { status: 500 }
     );

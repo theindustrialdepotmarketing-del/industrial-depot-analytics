@@ -524,7 +524,7 @@ export default function SettingsPage() {
                 <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                   <CheckCircle2 size={18} color="#22c55e" />
                   <span style={{ fontWeight: 700, color: "#22c55e", fontSize: "0.9rem" }}>
-                    ¡Conexión Exitosa con Supabase!
+                    Conexión exitosa con Supabase
                   </span>
                 </div>
 
@@ -537,14 +537,14 @@ export default function SettingsPage() {
                   }}
                 >
                   <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Empresa Encontrada</div>
+                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Empresa</div>
                     <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.2rem" }}>
                       {supabaseResult.companyName}
                     </div>
                   </div>
 
                   <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>GA4 Property ID</div>
+                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Property ID</div>
                     <div style={{ color: "#1e9bd7", fontWeight: 700, marginTop: "0.2rem" }}>
                       {supabaseResult.propertyId}
                     </div>
