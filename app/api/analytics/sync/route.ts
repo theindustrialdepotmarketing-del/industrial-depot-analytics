@@ -1,38 +1,47 @@
 import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
+import { runDailySync } from "@/lib/sync/daily-sync";
+
+export const runtime = "nodejs";
 
 /**
  * POST /api/analytics/sync
- * Private route to sync Google Analytics data to Supabase.
- * Protected by session authentication.
- * Returns 503 until GA4 connection is configured.
+ * Protected administrative route to manually trigger GA4 -> Supabase synchronization.
+ * Requires an authenticated admin session.
+ * Exclusively executes server-side on Node.js runtime.
  */
-export const POST = auth(async function (req) {
-  if (!req.auth) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export async function POST() {
+  const session = await auth();
 
-  const ga4PropertyId = process.env.GA4_PROPERTY_ID;
-
-  if (!ga4PropertyId) {
+  if (!session?.user) {
     return NextResponse.json(
       {
         success: false,
-        message: "GA4 not configured. Set GA4_PROPERTY_ID in environment variables.",
-        timestamp: new Date().toISOString(),
+        error: "UNAUTHORIZED",
+        message: "Se requiere sesión administrativa para ejecutar la sincronización manual.",
       },
-      { status: 503 }
+      { status: 401 }
     );
   }
 
-  // TODO: Implement GA4 sync via Workload Identity Federation
-  // This will be enabled in Phase 2 when GA4 credentials are configured.
-  return NextResponse.json(
-    {
-      success: false,
-      message: "GA4 sync not yet implemented. Configure Workload Identity Federation first.",
-      timestamp: new Date().toISOString(),
-    },
-    { status: 503 }
-  );
-});
+  try {
+    const result = await runDailySync("manual");
+    return NextResponse.json(
+      {
+        ...result,
+        message: "Sincronización manual completada exitosamente.",
+      },
+      { status: 200 }
+    );
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Error durante la sincronización manual";
+    return NextResponse.json(
+      {
+        success: false,
+        error: "MANUAL_SYNC_FAILED",
+        message: `Error ejecutando sincronización manual: ${message}`,
+      },
+      { status: 500 }
+    );
+  }
+}

@@ -76,7 +76,7 @@ export class GA4PropertyNotFoundError extends Error {
  * Creates authenticated BetaAnalyticsDataClient with targetScopes explicitly attached
  * to Impersonated credentials for Google Cloud Workload Identity Federation.
  */
-async function getGA4ClientWithDiagnostics(): Promise<{
+export async function getGA4ClientWithDiagnostics(): Promise<{
   client: BetaAnalyticsDataClient;
   diagnostics: GA4Diagnostics;
 }> {

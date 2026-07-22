@@ -22,6 +22,124 @@ export const TestSupabaseResponseSchema = z.object({
 });
 export type TestSupabaseResponse = z.infer<typeof TestSupabaseResponseSchema>;
 
+/* ─── Sync Logs ─── */
+export const SyncLogSchema = z.object({
+  id: z.string().optional(),
+  company_id: z.string().optional(),
+  sync_type: z.enum(["daily", "manual"] as [string, ...string[]]),
+  status: z.enum(["running", "success", "partial", "failed"] as [string, ...string[]]),
+  started_at: z.string(),
+  completed_at: z.string().nullable().optional(),
+  records_created: z.number().optional(),
+  records_updated: z.number().optional(),
+  error_message: z.string().nullable().optional(),
+  created_at: z.string().optional(),
+});
+export type SyncLog = z.infer<typeof SyncLogSchema>;
+
+/* ─── Daily Metrics ─── */
+export const DailyMetricsSchema = z.object({
+  id: z.string().optional(),
+  company_id: z.string(),
+  metric_date: z.string(),
+  active_users: z.number(),
+  new_users: z.number(),
+  sessions: z.number(),
+  engaged_sessions: z.number(),
+  engagement_rate: z.number(),
+  average_session_duration: z.number(),
+  key_events: z.number(),
+  session_key_event_rate: z.number(),
+  total_revenue: z.number(),
+  created_at: z.string().optional(),
+  updated_at: z.string().optional(),
+});
+export type DailyMetrics = z.infer<typeof DailyMetricsSchema>;
+
+/* ─── Campaign Metrics ─── */
+export const CampaignMetricsSchema = z.object({
+  id: z.string().optional(),
+  company_id: z.string(),
+  metric_date: z.string(),
+  channel_group: z.string(),
+  source: z.string(),
+  medium: z.string(),
+  campaign_name: z.string(),
+  active_users: z.number(),
+  new_users: z.number(),
+  sessions: z.number(),
+  engaged_sessions: z.number(),
+  engagement_rate: z.number(),
+  key_events: z.number(),
+  session_key_event_rate: z.number(),
+  total_revenue: z.number(),
+  created_at: z.string().optional(),
+  updated_at: z.string().optional(),
+});
+export type CampaignMetrics = z.infer<typeof CampaignMetricsSchema>;
+
+/* ─── Page Metrics ─── */
+export const PageMetricsSchema = z.object({
+  id: z.string().optional(),
+  company_id: z.string(),
+  metric_date: z.string(),
+  landing_page: z.string(),
+  page_path: z.string(),
+  page_title: z.string(),
+  screen_page_views: z.number(),
+  active_users: z.number(),
+  sessions: z.number(),
+  engaged_sessions: z.number(),
+  engagement_rate: z.number(),
+  user_engagement_duration: z.number(),
+  key_events: z.number(),
+  total_revenue: z.number(),
+  created_at: z.string().optional(),
+  updated_at: z.string().optional(),
+});
+export type PageMetrics = z.infer<typeof PageMetricsSchema>;
+
+/* ─── Audience Metrics ─── */
+export const AudienceMetricsSchema = z.object({
+  id: z.string().optional(),
+  company_id: z.string(),
+  metric_date: z.string(),
+  device_category: z.string(),
+  country: z.string(),
+  region: z.string(),
+  city: z.string(),
+  active_users: z.number(),
+  new_users: z.number(),
+  sessions: z.number(),
+  engagement_rate: z.number(),
+  key_events: z.number(),
+  total_revenue: z.number(),
+  created_at: z.string().optional(),
+  updated_at: z.string().optional(),
+});
+export type AudienceMetrics = z.infer<typeof AudienceMetricsSchema>;
+
+/* ─── Sync Result ─── */
+export const SyncResultSchema = z.object({
+  success: z.boolean(),
+  status: z.enum(["success", "partial", "failed"] as [string, ...string[]]),
+  syncedDate: z.string(),
+  recordsProcessed: z.number(),
+  recordsCreated: z.number(),
+  recordsUpdated: z.number(),
+  details: z.object({
+    dailyMetrics: z.number(),
+    campaignMetrics: z.number(),
+    pageMetrics: z.number(),
+    audienceMetrics: z.number(),
+  }),
+  startedAt: z.string(),
+  completedAt: z.string(),
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+export type SyncResult = z.infer<typeof SyncResultSchema>;
+
 /* ─── Metrics Snapshot (stored in Supabase) ─── */
 export const MetricsSnapshotSchema = z.object({
   id: z.string().uuid(),
@@ -122,6 +240,31 @@ export interface Database {
         Row: Company;
         Insert: Partial<Company>;
         Update: Partial<Company>;
+      };
+      sync_logs: {
+        Row: SyncLog;
+        Insert: Partial<SyncLog>;
+        Update: Partial<SyncLog>;
+      };
+      daily_metrics: {
+        Row: DailyMetrics;
+        Insert: Partial<DailyMetrics>;
+        Update: Partial<DailyMetrics>;
+      };
+      campaign_metrics: {
+        Row: CampaignMetrics;
+        Insert: Partial<CampaignMetrics>;
+        Update: Partial<CampaignMetrics>;
+      };
+      page_metrics: {
+        Row: PageMetrics;
+        Insert: Partial<PageMetrics>;
+        Update: Partial<PageMetrics>;
+      };
+      audience_metrics: {
+        Row: AudienceMetrics;
+        Insert: Partial<AudienceMetrics>;
+        Update: Partial<AudienceMetrics>;
       };
       metrics_snapshots: {
         Row: MetricsSnapshot;

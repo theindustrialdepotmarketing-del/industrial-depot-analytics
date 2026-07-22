@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import type { TestGA4Response } from "@/lib/types/analytics";
-import type { TestSupabaseResponse } from "@/lib/types/database";
+import type { TestSupabaseResponse, SyncResult } from "@/lib/types/database";
 import {
   Database,
   BarChart3,
@@ -15,6 +15,7 @@ import {
   Play,
   AlertCircle,
   Info,
+  RefreshCw,
 } from "lucide-react";
 
 function SettingSection({
@@ -141,11 +142,17 @@ export default function SettingsPage() {
   const [supabaseResult, setSupabaseResult] = useState<TestSupabaseResponse | null>(null);
   const [supabaseError, setSupabaseError] = useState<string | null>(null);
 
+  // Sync test state
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
   // Dynamic connection states
   const isGa4Connected = Boolean(ga4Result?.success && !ga4Result?.isLocalEnv);
   const isSupabaseConnected = Boolean(
     supabaseResult?.success && supabaseResult?.databaseConnected
   );
+  const isSyncConnected = Boolean(syncResult?.success);
 
   const handleTestGa4Connection = async () => {
     setTestingGa4(true);
@@ -199,6 +206,34 @@ export default function SettingsPage() {
       setSupabaseResult(null);
     } finally {
       setTestingSupabase(false);
+    }
+  };
+
+  const handleManualSync = async () => {
+    setSyncing(true);
+    setSyncError(null);
+
+    try {
+      const res = await fetch("/api/analytics/sync", {
+        method: "POST",
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        setSyncError(data.message || `Error en sincronización manual (${res.status})`);
+        setSyncResult(null);
+      } else {
+        setSyncResult(data);
+      }
+    } catch (err: unknown) {
+      setSyncError(
+        err instanceof Error
+          ? err.message
+          : "Error de red al intentar ejecutar la sincronización manual"
+      );
+      setSyncResult(null);
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -261,7 +296,7 @@ export default function SettingsPage() {
               </button>
             </div>
 
-            {/* Test Error display */}
+            {/* GA4 Test Error display */}
             {ga4Error && (
               <div
                 style={{
@@ -288,7 +323,7 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {/* Test Result display */}
+            {/* GA4 Test Result display */}
             {ga4Result && ga4Result.isLocalEnv && (
               <div
                 style={{
@@ -569,20 +604,167 @@ export default function SettingsPage() {
           </div>
         </SettingSection>
 
-        {/* Cron */}
+        {/* Automatic Daily Sync Section */}
         <SettingSection title="Sincronización automática" icon={Clock}>
           <SettingRow
             label="Cron diario"
-            desc="Ejecuta /api/cron/daily a las 2:00 AM UTC todos los días"
-            connected={false}
+            desc="Ejecuta /api/cron/daily a las 11:00 AM UTC todos los días"
+            connected={isSyncConnected}
           />
           <SettingRow
             label="CRON_SECRET"
-            desc="Secreto para proteger el endpoint de cron"
-            connected={false}
+            desc="Secreto de autorización para Vercel Cron"
+            connected={isSyncConnected}
           />
-          <div style={{ fontSize: "0.78rem", color: "#475569", lineHeight: 1.7 }}>
-            Configura en <code style={{ color: "#1e9bd7" }}>vercel.json</code>:
+          <SettingRow
+            label="Sincronización manual"
+            desc="Transfiere métricas diarias, campañas, páginas y audiencias a Supabase"
+            value={syncResult?.completedAt ? new Date(syncResult.completedAt).toLocaleString("es-ES") : undefined}
+            connected={isSyncConnected}
+          />
+
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "1rem",
+              paddingTop: "0.5rem",
+              borderTop: "1px solid var(--border-color)",
+            }}
+          >
+            <div>
+              <button
+                onClick={handleManualSync}
+                disabled={syncing}
+                className="btn-primary"
+                style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}
+              >
+                {syncing ? (
+                  <>
+                    <LoadingSpinner size={16} color="#ffffff" />
+                    Sincronizando datos de GA4 hacia Supabase...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw size={15} />
+                    Ejecutar sincronización ahora
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Sync Error display */}
+            {syncError && (
+              <div
+                style={{
+                  background: "rgba(239, 68, 68, 0.08)",
+                  border: "1px solid rgba(239, 68, 68, 0.25)",
+                  borderRadius: "8px",
+                  padding: "1rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "0.5rem",
+                }}
+              >
+                <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
+                  <AlertCircle size={18} color="#ef4444" style={{ flexShrink: 0, marginTop: "2px" }} />
+                  <div>
+                    <div style={{ fontWeight: 600, color: "#ef4444", fontSize: "0.85rem" }}>
+                      Error en la sincronización automática
+                    </div>
+                    <div style={{ color: "#94a3b8", fontSize: "0.8rem", marginTop: "0.25rem", lineHeight: 1.5 }}>
+                      {syncError}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Sync Result display */}
+            {syncResult && syncResult.success && (
+              <div
+                style={{
+                  background: "rgba(34, 197, 94, 0.08)",
+                  border: "1px solid rgba(34, 197, 94, 0.25)",
+                  borderRadius: "8px",
+                  padding: "1.25rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "1rem",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <CheckCircle2 size={18} color="#22c55e" />
+                  <span style={{ fontWeight: 700, color: "#22c55e", fontSize: "0.9rem" }}>
+                    ¡Sincronización Completada Exitosamente!
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+                    gap: "0.75rem",
+                    fontSize: "0.8rem",
+                  }}
+                >
+                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
+                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Fecha Sincronizada</div>
+                    <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.2rem" }}>
+                      {syncResult.syncedDate} (Día anterior completo)
+                    </div>
+                  </div>
+
+                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
+                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Registros Procesados</div>
+                    <div style={{ color: "#1e9bd7", fontWeight: 700, marginTop: "0.2rem" }}>
+                      {syncResult.recordsProcessed.toLocaleString()} filas
+                    </div>
+                  </div>
+
+                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
+                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Estado</div>
+                    <div style={{ color: "#22c55e", fontWeight: 700, marginTop: "0.2rem" }}>
+                      {syncResult.status}
+                    </div>
+                  </div>
+
+                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
+                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Última Ejecución</div>
+                    <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.2rem" }}>
+                      {new Date(syncResult.completedAt).toLocaleTimeString("es-ES")}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Details Breakdown */}
+                {syncResult.details && (
+                  <div
+                    style={{
+                      background: "rgba(15,23,42,0.8)",
+                      border: "1px solid var(--border-color)",
+                      borderRadius: "6px",
+                      padding: "0.75rem",
+                      fontSize: "0.75rem",
+                    }}
+                  >
+                    <div style={{ color: "#64748b", fontWeight: 600, marginBottom: "0.35rem" }}>
+                      Desglose de Registros por Tabla:
+                    </div>
+                    <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", color: "#94a3b8" }}>
+                      <span>Métricas Diarias: <strong style={{ color: "#f1f5f9" }}>{syncResult.details.dailyMetrics}</strong></span>
+                      <span>Campañas: <strong style={{ color: "#f1f5f9" }}>{syncResult.details.campaignMetrics}</strong></span>
+                      <span>Páginas: <strong style={{ color: "#f1f5f9" }}>{syncResult.details.pageMetrics}</strong></span>
+                      <span>Audiencias: <strong style={{ color: "#f1f5f9" }}>{syncResult.details.audienceMetrics}</strong></span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div style={{ fontSize: "0.78rem", color: "#475569", lineHeight: 1.7, marginTop: "0.5rem" }}>
+            Configurado en <code style={{ color: "#1e9bd7" }}>vercel.json</code>:
             <pre
               style={{
                 background: "#0a0f1e",
@@ -595,7 +777,7 @@ export default function SettingsPage() {
                 fontSize: "0.75rem",
               }}
             >
-              {`{\n  "crons": [{\n    "path": "/api/cron/daily",\n    "schedule": "0 2 * * *"\n  }]\n}`}
+              {`{\n  "crons": [{\n    "path": "/api/cron/daily",\n    "schedule": "0 11 * * *"\n  }]\n}`}
             </pre>
           </div>
         </SettingSection>
