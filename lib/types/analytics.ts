@@ -60,6 +60,15 @@ export const GA4SummaryMetricsSchema = z.object({
 });
 export type GA4SummaryMetrics = z.infer<typeof GA4SummaryMetricsSchema>;
 
+export const GA4DiagnosticsSchema = z.object({
+  oidcTokenReceived: z.boolean(),
+  workloadIdentityExchange: z.enum(["success", "failed"] as [string, ...string[]]),
+  serviceAccountImpersonation: z.enum(["success", "failed"] as [string, ...string[]]),
+  analyticsScopeConfigured: z.boolean(),
+  ga4Query: z.enum(["success", "failed"] as [string, ...string[]]),
+});
+export type GA4Diagnostics = z.infer<typeof GA4DiagnosticsSchema>;
+
 export const TestGA4ResponseSchema = z.object({
   success: z.boolean(),
   propertyId: z.string(),
@@ -71,6 +80,7 @@ export const TestGA4ResponseSchema = z.object({
   rowCount: z.number(),
   summary: GA4SummaryMetricsSchema,
   rows: z.array(GA4ReportRowSchema),
+  diagnostics: GA4DiagnosticsSchema,
   timestamp: z.string(),
   isLocalEnv: z.boolean().optional(),
   message: z.string().optional(),

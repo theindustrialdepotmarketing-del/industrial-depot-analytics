@@ -145,6 +145,9 @@ export default function SettingsPage() {
 
       if (!res.ok && !data.isLocalEnv) {
         setTestError(data.message || `Error consultando GA4 (${res.status})`);
+        if (data.diagnostics) {
+          setTestResult(data);
+        }
       } else {
         setTestResult(data);
       }
@@ -227,17 +230,19 @@ export default function SettingsPage() {
                   borderRadius: "8px",
                   padding: "1rem",
                   display: "flex",
-                  gap: "0.75rem",
-                  alignItems: "flex-start",
+                  flexDirection: "column",
+                  gap: "0.5rem",
                 }}
               >
-                <AlertCircle size={18} color="#ef4444" style={{ flexShrink: 0, marginTop: "2px" }} />
-                <div>
-                  <div style={{ fontWeight: 600, color: "#ef4444", fontSize: "0.85rem" }}>
-                    Error en la prueba de conexión
-                  </div>
-                  <div style={{ color: "#94a3b8", fontSize: "0.8rem", marginTop: "0.25rem" }}>
-                    {testError}
+                <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
+                  <AlertCircle size={18} color="#ef4444" style={{ flexShrink: 0, marginTop: "2px" }} />
+                  <div>
+                    <div style={{ fontWeight: 600, color: "#ef4444", fontSize: "0.85rem" }}>
+                      Error en la prueba de conexión
+                    </div>
+                    <div style={{ color: "#94a3b8", fontSize: "0.8rem", marginTop: "0.25rem", lineHeight: 1.5 }}>
+                      {testError}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -338,6 +343,55 @@ export default function SettingsPage() {
                     </div>
                   </div>
                 </div>
+
+                {/* Safe Diagnostics Block */}
+                {testResult.diagnostics && (
+                  <div
+                    style={{
+                      background: "rgba(15,23,42,0.8)",
+                      border: "1px solid var(--border-color)",
+                      borderRadius: "6px",
+                      padding: "0.75rem",
+                      fontSize: "0.75rem",
+                    }}
+                  >
+                    <div style={{ color: "#64748b", fontWeight: 600, marginBottom: "0.35rem" }}>
+                      Diagnóstico de Autenticación:
+                    </div>
+                    <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", color: "#94a3b8" }}>
+                      <span>
+                        OIDC Token:{" "}
+                        <strong style={{ color: testResult.diagnostics.oidcTokenReceived ? "#22c55e" : "#ef4444" }}>
+                          {testResult.diagnostics.oidcTokenReceived ? "OK" : "NO"}
+                        </strong>
+                      </span>
+                      <span>
+                        Intercambio WIF:{" "}
+                        <strong style={{ color: testResult.diagnostics.workloadIdentityExchange === "success" ? "#22c55e" : "#ef4444" }}>
+                          {testResult.diagnostics.workloadIdentityExchange}
+                        </strong>
+                      </span>
+                      <span>
+                        Impersonación:{" "}
+                        <strong style={{ color: testResult.diagnostics.serviceAccountImpersonation === "success" ? "#22c55e" : "#ef4444" }}>
+                          {testResult.diagnostics.serviceAccountImpersonation}
+                        </strong>
+                      </span>
+                      <span>
+                        OAuth Scopes:{" "}
+                        <strong style={{ color: testResult.diagnostics.analyticsScopeConfigured ? "#22c55e" : "#ef4444" }}>
+                          {testResult.diagnostics.analyticsScopeConfigured ? "analytics.readonly" : "Falta"}
+                        </strong>
+                      </span>
+                      <span>
+                        Consulta GA4:{" "}
+                        <strong style={{ color: testResult.diagnostics.ga4Query === "success" ? "#22c55e" : "#ef4444" }}>
+                          {testResult.diagnostics.ga4Query}
+                        </strong>
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -359,8 +413,10 @@ export default function SettingsPage() {
             <br />
             2. Google Workload Identity Federation valida el token sin requerir archivos JSON.
             <br />
-            3. GCP otorga permisos temporales impersonando el Service Account{" "}
-            <code style={{ color: "#1e9bd7" }}>ga4-dashboard-reader@...</code>.
+            3. GCP otorga permisos temporales impersonando la cuenta{" "}
+            <code style={{ color: "#1e9bd7" }}>ga4-dashboard-reader@...</code> incluyendo los OAuth Scopes{" "}
+            <code style={{ color: "#1e9bd7" }}>analytics.readonly</code> y{" "}
+            <code style={{ color: "#1e9bd7" }}>cloud-platform</code>.
             <br />
             4. Ningún secreto ni clave privada permanente es almacenada o expuesta al navegador.
           </div>
