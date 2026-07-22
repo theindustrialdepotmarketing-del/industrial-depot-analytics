@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import type { TestGA4Response } from "@/lib/types/analytics";
-import type { TestSupabaseResponse, SyncResult } from "@/lib/types/database";
+import type { TestSupabaseResponse, SyncResult, BackfillResponse } from "@/lib/types/database";
 import {
   Database,
   BarChart3,
@@ -16,6 +16,10 @@ import {
   AlertCircle,
   Info,
   RefreshCw,
+  History,
+  DownloadCloud,
+  Layers,
+  Calendar,
 } from "lucide-react";
 
 function SettingSection({
@@ -142,10 +146,17 @@ export default function SettingsPage() {
   const [supabaseResult, setSupabaseResult] = useState<TestSupabaseResponse | null>(null);
   const [supabaseError, setSupabaseError] = useState<string | null>(null);
 
-  // Sync test state
+  // Daily Sync state
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+
+  // Historical Backfill state
+  const [selectedDays, setSelectedDays] = useState<30 | 60 | 90 | 180>(90);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillResult, setBackfillResult] = useState<BackfillResponse | null>(null);
+  const [backfillError, setBackfillError] = useState<string | null>(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   // Dynamic connection states
   const isGa4Connected = Boolean(ga4Result?.success && !ga4Result?.isLocalEnv);
@@ -153,6 +164,28 @@ export default function SettingsPage() {
     supabaseResult?.success && supabaseResult?.databaseConnected
   );
   const isSyncConnected = Boolean(syncResult?.success);
+
+  // Fetch initial backfill status cleanly
+  useEffect(() => {
+    let isMounted = true;
+    async function loadStatus() {
+      try {
+        const res = await fetch("/api/sync/backfill");
+        if (res.ok && isMounted) {
+          const data: BackfillResponse = await res.json();
+          if (data.success && data.progress) {
+            setBackfillResult(data);
+          }
+        }
+      } catch {
+        // Suppress background status check errors
+      }
+    }
+    loadStatus();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleTestGa4Connection = async () => {
     setTestingGa4(true);
@@ -237,6 +270,62 @@ export default function SettingsPage() {
     }
   };
 
+  // Automated step-by-step backfill loop
+  const executeBackfillLoop = async (
+    days: 30 | 60 | 90 | 180,
+    initialAction: "start" | "continue"
+  ) => {
+    setBackfilling(true);
+    setBackfillError(null);
+
+    let currentAction = initialAction;
+    let hasMore = true;
+
+    try {
+      while (hasMore) {
+        const res = await fetch("/api/sync/backfill", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ days, action: currentAction }),
+        });
+
+        const data: BackfillResponse = await res.json();
+
+        if (!res.ok || !data.success) {
+          setBackfillError(data.message || `Error en la carga histórica (${res.status})`);
+          break;
+        }
+
+        setBackfillResult(data);
+        hasMore = data.hasMoreChunks;
+        currentAction = "continue";
+
+        // Brief pause between chunk requests to let the event loop breathe
+        if (hasMore) {
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+      }
+    } catch (err: unknown) {
+      setBackfillError(
+        err instanceof Error
+          ? err.message
+          : "Error de red durante la carga histórica"
+      );
+    } finally {
+      setBackfilling(false);
+      setShowConfirmModal(false);
+    }
+  };
+
+  const startBackfillProcess = () => {
+    setShowConfirmModal(false);
+    executeBackfillLoop(selectedDays, "start");
+  };
+
+  const continueBackfillProcess = () => {
+    executeBackfillLoop(selectedDays, "continue");
+  };
+
   return (
     <>
       <SectionHeader
@@ -278,7 +367,7 @@ export default function SettingsPage() {
             <div>
               <button
                 onClick={handleTestGa4Connection}
-                disabled={testingGa4}
+                disabled={testingGa4 || backfilling}
                 className="btn-primary"
                 style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}
               >
@@ -419,7 +508,7 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* Safe Diagnostics Block */}
+                {/* Diagnostics Block */}
                 {ga4Result.diagnostics && (
                   <div
                     style={{
@@ -498,7 +587,7 @@ export default function SettingsPage() {
             <div>
               <button
                 onClick={handleTestSupabaseConnection}
-                disabled={testingSupabase}
+                disabled={testingSupabase || backfilling}
                 className="btn-primary"
                 style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}
               >
@@ -635,7 +724,7 @@ export default function SettingsPage() {
             <div>
               <button
                 onClick={handleManualSync}
-                disabled={syncing}
+                disabled={syncing || backfilling}
                 className="btn-primary"
                 style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}
               >
@@ -762,23 +851,295 @@ export default function SettingsPage() {
               </div>
             )}
           </div>
+        </SettingSection>
 
-          <div style={{ fontSize: "0.78rem", color: "#475569", lineHeight: 1.7, marginTop: "0.5rem" }}>
-            Configurado en <code style={{ color: "#1e9bd7" }}>vercel.json</code>:
-            <pre
-              style={{
-                background: "#0a0f1e",
-                border: "1px solid var(--border-color)",
-                borderRadius: "6px",
-                padding: "0.75rem",
-                marginTop: "0.5rem",
-                overflow: "auto",
-                color: "#94a3b8",
-                fontSize: "0.75rem",
-              }}
-            >
-              {`{\n  "crons": [{\n    "path": "/api/cron/daily",\n    "schedule": "0 11 * * *"\n  }]\n}`}
-            </pre>
+        {/* Historical Backfill Section */}
+        <SettingSection title="Carga histórica" icon={History}>
+          <SettingRow
+            label="Procesamiento por bloques"
+            desc="Carga datos en bloques de 7 días para evitar límites de tiempo y garantizar la recuperabilidad"
+            value="Bloques de 7 días"
+            connected={backfillResult?.status === "success"}
+          />
+
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "1.25rem",
+              paddingTop: "0.5rem",
+              borderTop: "1px solid var(--border-color)",
+            }}
+          >
+            {/* Control controls: Select & Action Buttons */}
+            <div style={{ display: "flex", gap: "1rem", alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                <label style={{ fontSize: "0.78rem", color: "#94a3b8", fontWeight: 500 }}>
+                  Período a importar:
+                </label>
+                <select
+                  value={selectedDays}
+                  onChange={(e) => setSelectedDays(Number(e.target.value) as 30 | 60 | 90 | 180)}
+                  disabled={backfilling}
+                  style={{
+                    background: "#0f172a",
+                    color: "#f1f5f9",
+                    border: "1px solid var(--border-color)",
+                    borderRadius: "8px",
+                    padding: "0.5rem 1rem",
+                    fontSize: "0.85rem",
+                    outline: "none",
+                    cursor: backfilling ? "not-allowed" : "pointer",
+                  }}
+                >
+                  <option value={30}>Últimos 30 días</option>
+                  <option value={60}>Últimos 60 días</option>
+                  <option value={90}>Últimos 90 días</option>
+                  <option value={180}>Últimos 180 días</option>
+                </select>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "flex-end", gap: "0.75rem", flex: 1, paddingTop: "1.25rem" }}>
+                <button
+                  onClick={() => setShowConfirmModal(true)}
+                  disabled={backfilling}
+                  className="btn-primary"
+                  style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}
+                >
+                  {backfilling ? (
+                    <>
+                      <LoadingSpinner size={16} color="#ffffff" />
+                      Cargando historial ({backfillResult?.progress?.percent || 0}%)...
+                    </>
+                  ) : (
+                    <>
+                      <DownloadCloud size={16} />
+                      Cargar historial
+                    </>
+                  )}
+                </button>
+
+                {/* Continue button if paused or has pending chunks */}
+                {backfillResult?.hasMoreChunks && !backfilling && (
+                  <button
+                    onClick={continueBackfillProcess}
+                    style={{
+                      background: "rgba(30, 155, 215, 0.15)",
+                      color: "#1e9bd7",
+                      border: "1px solid rgba(30, 155, 215, 0.4)",
+                      padding: "0.55rem 1.1rem",
+                      borderRadius: "8px",
+                      fontSize: "0.85rem",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "0.5rem",
+                    }}
+                  >
+                    <RefreshCw size={15} />
+                    Continuar carga
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Confirmation Alert Dialog */}
+            {showConfirmModal && (
+              <div
+                style={{
+                  background: "rgba(15, 23, 42, 0.95)",
+                  border: "1px solid rgba(30, 155, 215, 0.4)",
+                  borderRadius: "10px",
+                  padding: "1.25rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "0.85rem",
+                }}
+              >
+                <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
+                  <Info size={20} color="#1e9bd7" style={{ flexShrink: 0, marginTop: "2px" }} />
+                  <div>
+                    <div style={{ fontWeight: 700, color: "#f1f5f9", fontSize: "0.9rem" }}>
+                      Confirmar Carga Histórica de {selectedDays} días
+                    </div>
+                    <div style={{ color: "#94a3b8", fontSize: "0.8rem", marginTop: "0.35rem", lineHeight: 1.6 }}>
+                      Se procesará el historial desde los últimos <strong>{selectedDays} días</strong> hasta ayer en bloques de 7 días.
+                      Esta operación es idempotente y actualizará métricas existentes en Supabase sin duplicar registros.
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: "0.75rem", justifyContent: "flex-end", marginTop: "0.25rem" }}>
+                  <button
+                    onClick={() => setShowConfirmModal(false)}
+                    style={{
+                      background: "transparent",
+                      color: "#94a3b8",
+                      border: "1px solid var(--border-color)",
+                      padding: "0.45rem 1rem",
+                      borderRadius: "6px",
+                      fontSize: "0.8rem",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={startBackfillProcess}
+                    className="btn-primary"
+                    style={{ fontSize: "0.8rem", padding: "0.45rem 1.25rem" }}
+                  >
+                    Confirmar e Iniciar
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Backfill Error Display */}
+            {backfillError && (
+              <div
+                style={{
+                  background: "rgba(239, 68, 68, 0.08)",
+                  border: "1px solid rgba(239, 68, 68, 0.25)",
+                  borderRadius: "8px",
+                  padding: "1rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "0.5rem",
+                }}
+              >
+                <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
+                  <AlertCircle size={18} color="#ef4444" style={{ flexShrink: 0, marginTop: "2px" }} />
+                  <div>
+                    <div style={{ fontWeight: 600, color: "#ef4444", fontSize: "0.85rem" }}>
+                      Error en la Carga Histórica
+                    </div>
+                    <div style={{ color: "#94a3b8", fontSize: "0.8rem", marginTop: "0.25rem", lineHeight: 1.5 }}>
+                      {backfillError}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Backfill Progress & Result Panel */}
+            {backfillResult?.progress && (
+              <div
+                style={{
+                  background: backfillResult.status === "success"
+                    ? "rgba(34, 197, 94, 0.08)"
+                    : "rgba(30, 155, 215, 0.08)",
+                  border: backfillResult.status === "success"
+                    ? "1px solid rgba(34, 197, 94, 0.25)"
+                    : "1px solid rgba(30, 155, 215, 0.25)",
+                  borderRadius: "10px",
+                  padding: "1.25rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "1rem",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    {backfillResult.status === "success" ? (
+                      <CheckCircle2 size={18} color="#22c55e" />
+                    ) : (
+                      <LoadingSpinner size={16} color="#1e9bd7" />
+                    )}
+                    <span
+                      style={{
+                        fontWeight: 700,
+                        color: backfillResult.status === "success" ? "#22c55e" : "#1e9bd7",
+                        fontSize: "0.9rem",
+                      }}
+                    >
+                      {backfillResult.status === "success"
+                        ? "¡Carga Histórica Completada Exitosamente!"
+                        : `Procesando Carga Histórica (${backfillResult.progress.percent}%)`}
+                    </span>
+                  </div>
+
+                  <span style={{ fontSize: "0.8rem", color: "#94a3b8", fontWeight: 600 }}>
+                    {backfillResult.progress.completedChunks} / {backfillResult.progress.totalChunks} Bloques
+                  </span>
+                </div>
+
+                {/* Progress Bar */}
+                <div
+                  style={{
+                    width: "100%",
+                    height: "8px",
+                    background: "rgba(15, 23, 42, 0.8)",
+                    borderRadius: "4px",
+                    overflow: "hidden",
+                    border: "1px solid var(--border-color)",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${backfillResult.progress.percent}%`,
+                      height: "100%",
+                      background: backfillResult.status === "success"
+                        ? "linear-gradient(90deg, #22c55e, #10b981)"
+                        : "linear-gradient(90deg, #1e9bd7, #3b82f6)",
+                      transition: "width 0.3s ease",
+                    }}
+                  />
+                </div>
+
+                {/* Metric Summary Grid */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                    gap: "0.75rem",
+                    fontSize: "0.8rem",
+                  }}
+                >
+                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
+                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase", display: "flex", alignItems: "center", gap: "0.3rem" }}>
+                      <Layers size={12} /> Bloques Completados
+                    </div>
+                    <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.2rem" }}>
+                      {backfillResult.progress.completedChunks} de {backfillResult.progress.totalChunks}
+                    </div>
+                  </div>
+
+                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
+                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase", display: "flex", alignItems: "center", gap: "0.3rem" }}>
+                      <Calendar size={12} /> Último Rango
+                    </div>
+                    <div style={{ color: "#1e9bd7", fontWeight: 600, marginTop: "0.2rem" }}>
+                      {backfillResult.progress.lastProcessedRange
+                        ? `${backfillResult.progress.lastProcessedRange.startDate} → ${backfillResult.progress.lastProcessedRange.endDate}`
+                        : "Completado"}
+                    </div>
+                  </div>
+
+                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
+                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Filas Procesadas</div>
+                    <div style={{ color: "#22c55e", fontWeight: 700, marginTop: "0.2rem" }}>
+                      {backfillResult.progress.recordsProcessed.toLocaleString()} registros
+                    </div>
+                  </div>
+
+                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
+                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Estado</div>
+                    <div
+                      style={{
+                        color: backfillResult.status === "success" ? "#22c55e" : "#1e9bd7",
+                        fontWeight: 700,
+                        marginTop: "0.2rem",
+                        textTransform: "capitalize",
+                      }}
+                    >
+                      {backfillResult.status}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </SettingSection>
 

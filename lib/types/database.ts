@@ -26,7 +26,7 @@ export type TestSupabaseResponse = z.infer<typeof TestSupabaseResponseSchema>;
 export const SyncLogSchema = z.object({
   id: z.string().optional(),
   company_id: z.string().optional(),
-  sync_type: z.enum(["daily", "manual"] as [string, ...string[]]),
+  sync_type: z.enum(["daily", "manual", "backfill"] as [string, ...string[]]),
   status: z.enum(["running", "success", "partial", "failed"] as [string, ...string[]]),
   started_at: z.string(),
   completed_at: z.string().nullable().optional(),
@@ -36,6 +36,37 @@ export const SyncLogSchema = z.object({
   created_at: z.string().optional(),
 });
 export type SyncLog = z.infer<typeof SyncLogSchema>;
+
+/* ─── Backfill Request & Response Schemas ─── */
+export const BackfillRequestSchema = z.object({
+  days: z.union([z.literal(30), z.literal(60), z.literal(90), z.literal(180)]),
+  action: z.enum(["start", "continue", "status"] as [string, ...string[]]).optional().default("start"),
+});
+export type BackfillRequest = z.infer<typeof BackfillRequestSchema>;
+
+export const BackfillProgressSchema = z.object({
+  totalChunks: z.number(),
+  completedChunks: z.number(),
+  percent: z.number(),
+  recordsProcessed: z.number(),
+  lastProcessedRange: z.object({
+    startDate: z.string(),
+    endDate: z.string(),
+  }).optional(),
+});
+export type BackfillProgress = z.infer<typeof BackfillProgressSchema>;
+
+export const BackfillResponseSchema = z.object({
+  success: z.boolean(),
+  status: z.enum(["running", "success", "partial", "failed"] as [string, ...string[]]),
+  syncLogId: z.string().optional(),
+  requestedDays: z.number().optional(),
+  progress: BackfillProgressSchema.optional(),
+  hasMoreChunks: z.boolean(),
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+export type BackfillResponse = z.infer<typeof BackfillResponseSchema>;
 
 /* ─── Daily Metrics ─── */
 export const DailyMetricsSchema = z.object({
