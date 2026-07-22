@@ -254,6 +254,42 @@ export const TaskSchema = z.object({
 });
 export type Task = z.infer<typeof TaskSchema>;
 
+/* ─── 404 URL Correction ─── */
+export const ReplacementTypeEnum = z.enum([
+  "same_product",
+  "equivalent_product",
+  "relevant_category",
+  "no_replacement",
+  "unknown",
+] as [string, ...string[]]);
+export type ReplacementType = z.infer<typeof ReplacementTypeEnum>;
+
+export const CorrectionStatusEnum = z.enum([
+  "pending_review",
+  "redirect_required",
+  "link_correction_required",
+  "keep_404",
+  "use_410",
+  "resolved",
+] as [string, ...string[]]);
+export type CorrectionStatus = z.infer<typeof CorrectionStatusEnum>;
+
+export const UrlCorrection404Schema = z.object({
+  id: z.string().optional(),
+  company_id: z.string().optional(),
+  page_path: z.string(),
+  replacement_url: z.string().optional(),
+  replacement_type: ReplacementTypeEnum.optional(),
+  verified_http_status: z.number().optional(),
+  correction_status: CorrectionStatusEnum.optional(),
+  notes: z.string().optional(),
+  assigned_to: z.string().optional(),
+  verified_at: z.string().nullable().optional(),
+  created_at: z.string().optional(),
+  updated_at: z.string().optional(),
+});
+export type UrlCorrection404 = z.infer<typeof UrlCorrection404Schema>;
+
 /* ─── Database Tables (for Supabase client typing) ─── */
 export interface Database {
   public: {
@@ -302,6 +338,11 @@ export interface Database {
         Row: Task;
         Insert: Partial<Task>;
         Update: Partial<Task>;
+      };
+      url_corrections_404: {
+        Row: UrlCorrection404;
+        Insert: Partial<UrlCorrection404>;
+        Update: Partial<UrlCorrection404>;
       };
     };
   };

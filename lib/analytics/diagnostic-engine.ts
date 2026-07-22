@@ -536,6 +536,46 @@ export async function runDiagnosticEngine(period: PeriodKey = "30d") {
     }
   }
 
+  // ─── 5.1. CONFIRMED 404 CRITICAL RULE (Requisitos 8, 9, 10) ───
+  let total404Sessions = 0;
+  let total404Views = 0;
+  let totalSiteViews = 0;
+
+  for (const page of pagesData.pages) {
+    totalSiteViews += page.views;
+    const is404 =
+      page.pageTitle.toLowerCase().includes("404") ||
+      page.pageTitle.toLowerCase().includes("not found") ||
+      page.landingPage.toLowerCase().includes("404") ||
+      page.pagePath.toLowerCase().includes("404");
+
+    if (is404) {
+      total404Sessions += page.sessions;
+      total404Views += page.views;
+    }
+  }
+
+  const ratio404Views = totalSiteViews > 0 ? total404Views / totalSiteViews : 0;
+
+  if (ratio404Views > 0.10 || total404Sessions > 100) {
+    findings.push({
+      id: "pages-404-critical",
+      fingerprint: "pages:404-critical:all",
+      category: "pages",
+      severity: "critical",
+      title: "URLs 404 Confirmadas Generando Impacto Significativo en Tráfico",
+      description: `Hecho: Se detectaron ${formatNum(total404Sessions)} sesiones y ${formatNum(total404Views)} vistas en páginas con respuesta HTTP 404 real (${formatPercentRate(ratio404Views)} de todas las vistas). Hipótesis: Enlaces rotos en campañas pagadas, productos descontinuados sin redirección 301 o URLs no actualizadas en Google Merchant Center o Sitemap.`,
+      evidence: `404 Sessions: ${formatNum(total404Sessions)}, 404 Views: ${formatNum(total404Views)} (${formatPercentRate(ratio404Views)} de vistas).`,
+      currentValue: Number(total404Sessions.toFixed(2)),
+      previousValue: 0,
+      percentageChange: Number((ratio404Views * 100).toFixed(2)),
+      affectedEntity: "URLs 404 Confirmadas",
+      proposedAction: "1) Auditar las URLs 404 con mayor tráfico prioritariamente (revisar tráfico pagado, landing pages y feeds). 2) Si existe el mismo producto, crear redirección 301 al producto nuevo. 3) Si existe producto sustituto, crear redirección 301 al equivalente. 4) Si existe categoría relevante, evaluar redirección 301 a la categoría. 5) Si no existe reemplazo, mantener 404 o evaluar HTTP 410 (Gone). EVITAR redirecciones masivas a la portada. 6) Implementar en GTM el evento 'page_not_found'.",
+      targetMetric: "page_404_rate",
+    });
+  }
+
+
   // ─── 6. DEVICE RULES ───
   let mobileSessions = 0;
   let desktopSessions = 0;
