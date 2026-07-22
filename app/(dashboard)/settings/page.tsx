@@ -18,8 +18,8 @@ import {
   RefreshCw,
   History,
   DownloadCloud,
-  Layers,
-  Calendar,
+  Activity,
+  Zap,
 } from "lucide-react";
 
 function SettingSection({
@@ -135,6 +135,16 @@ function SettingRow({
   );
 }
 
+interface AnalysisRunResult {
+  success: boolean;
+  period: string;
+  healthScore: { totalScore: number; status: string; color: string };
+  findingsCount: number;
+  campaignsAnalyzed: number;
+  message: string;
+  timestamp: string;
+}
+
 export default function SettingsPage() {
   // GA4 test state
   const [testingGa4, setTestingGa4] = useState(false);
@@ -149,14 +159,17 @@ export default function SettingsPage() {
   // Daily Sync state
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
 
   // Historical Backfill state
   const [selectedDays, setSelectedDays] = useState<30 | 60 | 90 | 180>(90);
   const [backfilling, setBackfilling] = useState(false);
   const [backfillResult, setBackfillResult] = useState<BackfillResponse | null>(null);
-  const [backfillError, setBackfillError] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+
+  // Diagnostic Engine Run State
+  const [runningAnalysis, setRunningAnalysis] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisRunResult | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
 
   // Dynamic connection states
   const isGa4Connected = Boolean(ga4Result?.success && !ga4Result?.isLocalEnv);
@@ -244,7 +257,6 @@ export default function SettingsPage() {
 
   const handleManualSync = async () => {
     setSyncing(true);
-    setSyncError(null);
 
     try {
       const res = await fetch("/api/analytics/sync", {
@@ -253,17 +265,11 @@ export default function SettingsPage() {
       const data = await res.json();
 
       if (!res.ok || !data.success) {
-        setSyncError(data.message || `Error en sincronización manual (${res.status})`);
         setSyncResult(null);
       } else {
         setSyncResult(data);
       }
-    } catch (err: unknown) {
-      setSyncError(
-        err instanceof Error
-          ? err.message
-          : "Error de red al intentar ejecutar la sincronización manual"
-      );
+    } catch {
       setSyncResult(null);
     } finally {
       setSyncing(false);
@@ -276,7 +282,6 @@ export default function SettingsPage() {
     initialAction: "start" | "continue"
   ) => {
     setBackfilling(true);
-    setBackfillError(null);
 
     let currentAction = initialAction;
     let hasMore = true;
@@ -292,7 +297,6 @@ export default function SettingsPage() {
         const data: BackfillResponse = await res.json();
 
         if (!res.ok || !data.success) {
-          setBackfillError(data.message || `Error en la carga histórica (${res.status})`);
           break;
         }
 
@@ -300,17 +304,12 @@ export default function SettingsPage() {
         hasMore = data.hasMoreChunks;
         currentAction = "continue";
 
-        // Brief pause between chunk requests to let the event loop breathe
         if (hasMore) {
           await new Promise((resolve) => setTimeout(resolve, 300));
         }
       }
-    } catch (err: unknown) {
-      setBackfillError(
-        err instanceof Error
-          ? err.message
-          : "Error de red durante la carga histórica"
-      );
+    } catch {
+      // Suppress backfill loop error
     } finally {
       setBackfilling(false);
       setShowConfirmModal(false);
@@ -326,6 +325,38 @@ export default function SettingsPage() {
     executeBackfillLoop(selectedDays, "continue");
   };
 
+  // Run Diagnostic Analysis Engine
+  const handleRunAnalysis = async () => {
+    setRunningAnalysis(true);
+    setAnalysisError(null);
+
+    try {
+      const res = await fetch("/api/analysis/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ period: "30d" }),
+      });
+
+      const data: AnalysisRunResult = await res.json();
+
+      if (!res.ok || !data.success) {
+        setAnalysisError(data.message || `Error ejecutando análisis (${res.status})`);
+        setAnalysisResult(null);
+      } else {
+        setAnalysisResult(data);
+      }
+    } catch (err: unknown) {
+      setAnalysisError(
+        err instanceof Error
+          ? err.message
+          : "Error de red al ejecutar el análisis de diagnóstico"
+      );
+      setAnalysisResult(null);
+    } finally {
+      setRunningAnalysis(false);
+    }
+  };
+
   return (
     <>
       <SectionHeader
@@ -334,6 +365,90 @@ export default function SettingsPage() {
       />
 
       <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem", maxWidth: "760px" }}>
+        {/* Diagnostic Analysis Trigger Section */}
+        <SettingSection title="Motor de Diagnóstico y Análisis" icon={Activity}>
+          <SettingRow
+            label="Análisis determinístico"
+            desc="Evalúa tráfico, conversiones, atribución, páginas y dispositivos para generar alertas y recomendaciones en Supabase"
+            connected={Boolean(analysisResult?.success)}
+          />
+
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "1rem",
+              paddingTop: "0.5rem",
+              borderTop: "1px solid var(--border-color)",
+            }}
+          >
+            <div>
+              <button
+                onClick={handleRunAnalysis}
+                disabled={runningAnalysis || backfilling}
+                className="btn-primary"
+                style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}
+              >
+                {runningAnalysis ? (
+                  <>
+                    <LoadingSpinner size={16} color="#ffffff" />
+                    Ejecutando análisis determinístico...
+                  </>
+                ) : (
+                  <>
+                    <Zap size={15} />
+                    Ejecutar análisis ahora
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Analysis Error */}
+            {analysisError && (
+              <div style={{ background: "rgba(239, 68, 68, 0.08)", border: "1px solid rgba(239, 68, 68, 0.25)", borderRadius: "8px", padding: "1rem" }}>
+                <div style={{ fontWeight: 600, color: "#ef4444", fontSize: "0.85rem" }}>Error en el Análisis</div>
+                <div style={{ color: "#94a3b8", fontSize: "0.8rem", marginTop: "0.25rem" }}>{analysisError}</div>
+              </div>
+            )}
+
+            {/* Analysis Success Result */}
+            {analysisResult && analysisResult.success && (
+              <div style={{ background: "rgba(34, 197, 94, 0.08)", border: "1px solid rgba(34, 197, 94, 0.25)", borderRadius: "10px", padding: "1.25rem", display: "flex", flexDirection: "column", gap: "0.875rem" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <CheckCircle2 size={18} color="#22c55e" />
+                  <span style={{ fontWeight: 700, color: "#22c55e", fontSize: "0.9rem" }}>
+                    {analysisResult.message}
+                  </span>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "0.75rem", fontSize: "0.8rem" }}>
+                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
+                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Período Analizado</div>
+                    <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.2rem" }}>{analysisResult.period}</div>
+                  </div>
+
+                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
+                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Health Score</div>
+                    <div style={{ color: analysisResult.healthScore.color, fontWeight: 800, marginTop: "0.2rem" }}>
+                      {analysisResult.healthScore.totalScore} / 100 ({analysisResult.healthScore.status})
+                    </div>
+                  </div>
+
+                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
+                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Hallazgos Generados</div>
+                    <div style={{ color: "#1e9bd7", fontWeight: 700, marginTop: "0.2rem" }}>{analysisResult.findingsCount} alertas/recomendaciones</div>
+                  </div>
+
+                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
+                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Campañas Evaluadas</div>
+                    <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.2rem" }}>{analysisResult.campaignsAnalyzed} campañas</div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </SettingSection>
+
         {/* GA4 Integration Section */}
         <SettingSection title="Google Analytics 4" icon={BarChart3}>
           <SettingRow
@@ -456,106 +571,6 @@ export default function SettingsPage() {
                     ¡Conexión Exitosa con Google Analytics 4!
                   </span>
                 </div>
-
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-                    gap: "0.75rem",
-                    fontSize: "0.8rem",
-                  }}
-                >
-                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Período</div>
-                    <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.2rem" }}>
-                      {ga4Result.period.description}
-                    </div>
-                  </div>
-
-                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Filas Consultadas</div>
-                    <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.2rem" }}>
-                      {ga4Result.rowCount} días
-                    </div>
-                  </div>
-
-                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Usuarios Activos</div>
-                    <div style={{ color: "#1e9bd7", fontWeight: 700, marginTop: "0.2rem" }}>
-                      {ga4Result.summary.activeUsers.toLocaleString()}
-                    </div>
-                  </div>
-
-                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Nuevos Usuarios</div>
-                    <div style={{ color: "#1e9bd7", fontWeight: 700, marginTop: "0.2rem" }}>
-                      {ga4Result.summary.newUsers.toLocaleString()}
-                    </div>
-                  </div>
-
-                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Sesiones</div>
-                    <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.2rem" }}>
-                      {ga4Result.summary.sessions.toLocaleString()}
-                    </div>
-                  </div>
-
-                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Key Events</div>
-                    <div style={{ color: "#22c55e", fontWeight: 700, marginTop: "0.2rem" }}>
-                      {ga4Result.summary.keyEvents.toLocaleString()}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Diagnostics Block */}
-                {ga4Result.diagnostics && (
-                  <div
-                    style={{
-                      background: "rgba(15,23,42,0.8)",
-                      border: "1px solid var(--border-color)",
-                      borderRadius: "6px",
-                      padding: "0.75rem",
-                      fontSize: "0.75rem",
-                    }}
-                  >
-                    <div style={{ color: "#64748b", fontWeight: 600, marginBottom: "0.35rem" }}>
-                      Diagnóstico de Autenticación:
-                    </div>
-                    <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", color: "#94a3b8" }}>
-                      <span>
-                        OIDC Token:{" "}
-                        <strong style={{ color: ga4Result.diagnostics.oidcTokenReceived ? "#22c55e" : "#ef4444" }}>
-                          {ga4Result.diagnostics.oidcTokenReceived ? "OK" : "NO"}
-                        </strong>
-                      </span>
-                      <span>
-                        Intercambio WIF:{" "}
-                        <strong style={{ color: ga4Result.diagnostics.workloadIdentityExchange === "success" ? "#22c55e" : "#ef4444" }}>
-                          {ga4Result.diagnostics.workloadIdentityExchange}
-                        </strong>
-                      </span>
-                      <span>
-                        Impersonación:{" "}
-                        <strong style={{ color: ga4Result.diagnostics.serviceAccountImpersonation === "success" ? "#22c55e" : "#ef4444" }}>
-                          {ga4Result.diagnostics.serviceAccountImpersonation}
-                        </strong>
-                      </span>
-                      <span>
-                        OAuth Scopes:{" "}
-                        <strong style={{ color: ga4Result.diagnostics.analyticsScopeConfigured ? "#22c55e" : "#ef4444" }}>
-                          {ga4Result.diagnostics.analyticsScopeConfigured ? "analytics.readonly" : "Falta"}
-                        </strong>
-                      </span>
-                      <span>
-                        Consulta GA4:{" "}
-                        <strong style={{ color: ga4Result.diagnostics.ga4Query === "success" ? "#22c55e" : "#ef4444" }}>
-                          {ga4Result.diagnostics.ga4Query}
-                        </strong>
-                      </span>
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -651,43 +666,6 @@ export default function SettingsPage() {
                     Conexión exitosa con Supabase
                   </span>
                 </div>
-
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-                    gap: "0.75rem",
-                    fontSize: "0.8rem",
-                  }}
-                >
-                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Empresa</div>
-                    <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.2rem" }}>
-                      {supabaseResult.companyName}
-                    </div>
-                  </div>
-
-                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Property ID</div>
-                    <div style={{ color: "#1e9bd7", fontWeight: 700, marginTop: "0.2rem" }}>
-                      {supabaseResult.propertyId}
-                    </div>
-                  </div>
-
-                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Zona Horaria</div>
-                    <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.2rem" }}>
-                      {supabaseResult.timezone}
-                    </div>
-                  </div>
-
-                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Estado BD</div>
-                    <div style={{ color: "#22c55e", fontWeight: 700, marginTop: "0.2rem" }}>
-                      Conectado
-                    </div>
-                  </div>
-                </div>
               </div>
             )}
           </div>
@@ -741,115 +719,6 @@ export default function SettingsPage() {
                 )}
               </button>
             </div>
-
-            {/* Sync Error display */}
-            {syncError && (
-              <div
-                style={{
-                  background: "rgba(239, 68, 68, 0.08)",
-                  border: "1px solid rgba(239, 68, 68, 0.25)",
-                  borderRadius: "8px",
-                  padding: "1rem",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "0.5rem",
-                }}
-              >
-                <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
-                  <AlertCircle size={18} color="#ef4444" style={{ flexShrink: 0, marginTop: "2px" }} />
-                  <div>
-                    <div style={{ fontWeight: 600, color: "#ef4444", fontSize: "0.85rem" }}>
-                      Error en la sincronización automática
-                    </div>
-                    <div style={{ color: "#94a3b8", fontSize: "0.8rem", marginTop: "0.25rem", lineHeight: 1.5 }}>
-                      {syncError}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Sync Result display */}
-            {syncResult && syncResult.success && (
-              <div
-                style={{
-                  background: "rgba(34, 197, 94, 0.08)",
-                  border: "1px solid rgba(34, 197, 94, 0.25)",
-                  borderRadius: "8px",
-                  padding: "1.25rem",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "1rem",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                  <CheckCircle2 size={18} color="#22c55e" />
-                  <span style={{ fontWeight: 700, color: "#22c55e", fontSize: "0.9rem" }}>
-                    ¡Sincronización Completada Exitosamente!
-                  </span>
-                </div>
-
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-                    gap: "0.75rem",
-                    fontSize: "0.8rem",
-                  }}
-                >
-                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Fecha Sincronizada</div>
-                    <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.2rem" }}>
-                      {syncResult.syncedDate} (Día anterior completo)
-                    </div>
-                  </div>
-
-                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Registros Procesados</div>
-                    <div style={{ color: "#1e9bd7", fontWeight: 700, marginTop: "0.2rem" }}>
-                      {syncResult.recordsProcessed.toLocaleString()} filas
-                    </div>
-                  </div>
-
-                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Estado</div>
-                    <div style={{ color: "#22c55e", fontWeight: 700, marginTop: "0.2rem" }}>
-                      {syncResult.status}
-                    </div>
-                  </div>
-
-                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Última Ejecución</div>
-                    <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.2rem" }}>
-                      {new Date(syncResult.completedAt).toLocaleTimeString("es-ES")}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Details Breakdown */}
-                {syncResult.details && (
-                  <div
-                    style={{
-                      background: "rgba(15,23,42,0.8)",
-                      border: "1px solid var(--border-color)",
-                      borderRadius: "6px",
-                      padding: "0.75rem",
-                      fontSize: "0.75rem",
-                    }}
-                  >
-                    <div style={{ color: "#64748b", fontWeight: 600, marginBottom: "0.35rem" }}>
-                      Desglose de Registros por Tabla:
-                    </div>
-                    <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", color: "#94a3b8" }}>
-                      <span>Métricas Diarias: <strong style={{ color: "#f1f5f9" }}>{syncResult.details.dailyMetrics}</strong></span>
-                      <span>Campañas: <strong style={{ color: "#f1f5f9" }}>{syncResult.details.campaignMetrics}</strong></span>
-                      <span>Páginas: <strong style={{ color: "#f1f5f9" }}>{syncResult.details.pageMetrics}</strong></span>
-                      <span>Audiencias: <strong style={{ color: "#f1f5f9" }}>{syncResult.details.audienceMetrics}</strong></span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         </SettingSection>
 
@@ -871,7 +740,6 @@ export default function SettingsPage() {
               borderTop: "1px solid var(--border-color)",
             }}
           >
-            {/* Control controls: Select & Action Buttons */}
             <div style={{ display: "flex", gap: "1rem", alignItems: "center", flexWrap: "wrap" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
                 <label style={{ fontSize: "0.78rem", color: "#94a3b8", fontWeight: 500 }}>
@@ -919,7 +787,6 @@ export default function SettingsPage() {
                   )}
                 </button>
 
-                {/* Continue button if paused or has pending chunks */}
                 {backfillResult?.hasMoreChunks && !backfilling && (
                   <button
                     onClick={continueBackfillProcess}
@@ -944,7 +811,7 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* Confirmation Alert Dialog */}
+            {/* Confirmation Modal */}
             {showConfirmModal && (
               <div
                 style={{
@@ -965,7 +832,6 @@ export default function SettingsPage() {
                     </div>
                     <div style={{ color: "#94a3b8", fontSize: "0.8rem", marginTop: "0.35rem", lineHeight: 1.6 }}>
                       Se procesará el historial desde los últimos <strong>{selectedDays} días</strong> hasta ayer en bloques de 7 días.
-                      Esta operación es idempotente y actualizará métricas existentes en Supabase sin duplicar registros.
                     </div>
                   </div>
                 </div>
@@ -995,151 +861,6 @@ export default function SettingsPage() {
                 </div>
               </div>
             )}
-
-            {/* Backfill Error Display */}
-            {backfillError && (
-              <div
-                style={{
-                  background: "rgba(239, 68, 68, 0.08)",
-                  border: "1px solid rgba(239, 68, 68, 0.25)",
-                  borderRadius: "8px",
-                  padding: "1rem",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "0.5rem",
-                }}
-              >
-                <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
-                  <AlertCircle size={18} color="#ef4444" style={{ flexShrink: 0, marginTop: "2px" }} />
-                  <div>
-                    <div style={{ fontWeight: 600, color: "#ef4444", fontSize: "0.85rem" }}>
-                      Error en la Carga Histórica
-                    </div>
-                    <div style={{ color: "#94a3b8", fontSize: "0.8rem", marginTop: "0.25rem", lineHeight: 1.5 }}>
-                      {backfillError}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Backfill Progress & Result Panel */}
-            {backfillResult?.progress && (
-              <div
-                style={{
-                  background: backfillResult.status === "success"
-                    ? "rgba(34, 197, 94, 0.08)"
-                    : "rgba(30, 155, 215, 0.08)",
-                  border: backfillResult.status === "success"
-                    ? "1px solid rgba(34, 197, 94, 0.25)"
-                    : "1px solid rgba(30, 155, 215, 0.25)",
-                  borderRadius: "10px",
-                  padding: "1.25rem",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "1rem",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                    {backfillResult.status === "success" ? (
-                      <CheckCircle2 size={18} color="#22c55e" />
-                    ) : (
-                      <LoadingSpinner size={16} color="#1e9bd7" />
-                    )}
-                    <span
-                      style={{
-                        fontWeight: 700,
-                        color: backfillResult.status === "success" ? "#22c55e" : "#1e9bd7",
-                        fontSize: "0.9rem",
-                      }}
-                    >
-                      {backfillResult.status === "success"
-                        ? "¡Carga Histórica Completada Exitosamente!"
-                        : `Procesando Carga Histórica (${backfillResult.progress.percent}%)`}
-                    </span>
-                  </div>
-
-                  <span style={{ fontSize: "0.8rem", color: "#94a3b8", fontWeight: 600 }}>
-                    {backfillResult.progress.completedChunks} / {backfillResult.progress.totalChunks} Bloques
-                  </span>
-                </div>
-
-                {/* Progress Bar */}
-                <div
-                  style={{
-                    width: "100%",
-                    height: "8px",
-                    background: "rgba(15, 23, 42, 0.8)",
-                    borderRadius: "4px",
-                    overflow: "hidden",
-                    border: "1px solid var(--border-color)",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: `${backfillResult.progress.percent}%`,
-                      height: "100%",
-                      background: backfillResult.status === "success"
-                        ? "linear-gradient(90deg, #22c55e, #10b981)"
-                        : "linear-gradient(90deg, #1e9bd7, #3b82f6)",
-                      transition: "width 0.3s ease",
-                    }}
-                  />
-                </div>
-
-                {/* Metric Summary Grid */}
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-                    gap: "0.75rem",
-                    fontSize: "0.8rem",
-                  }}
-                >
-                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase", display: "flex", alignItems: "center", gap: "0.3rem" }}>
-                      <Layers size={12} /> Bloques Completados
-                    </div>
-                    <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.2rem" }}>
-                      {backfillResult.progress.completedChunks} de {backfillResult.progress.totalChunks}
-                    </div>
-                  </div>
-
-                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase", display: "flex", alignItems: "center", gap: "0.3rem" }}>
-                      <Calendar size={12} /> Último Rango
-                    </div>
-                    <div style={{ color: "#1e9bd7", fontWeight: 600, marginTop: "0.2rem" }}>
-                      {backfillResult.progress.lastProcessedRange
-                        ? `${backfillResult.progress.lastProcessedRange.startDate} → ${backfillResult.progress.lastProcessedRange.endDate}`
-                        : "Completado"}
-                    </div>
-                  </div>
-
-                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Filas Procesadas</div>
-                    <div style={{ color: "#22c55e", fontWeight: 700, marginTop: "0.2rem" }}>
-                      {backfillResult.progress.recordsProcessed.toLocaleString()} registros
-                    </div>
-                  </div>
-
-                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
-                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Estado</div>
-                    <div
-                      style={{
-                        color: backfillResult.status === "success" ? "#22c55e" : "#1e9bd7",
-                        fontWeight: 700,
-                        marginTop: "0.2rem",
-                        textTransform: "capitalize",
-                      }}
-                    >
-                      {backfillResult.status}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         </SettingSection>
 
@@ -1155,21 +876,6 @@ export default function SettingsPage() {
             desc="Clave de sesión JWT"
             connected={false}
           />
-          <div
-            style={{
-              background: "rgba(239,68,68,0.06)",
-              border: "1px solid rgba(239,68,68,0.15)",
-              borderRadius: "8px",
-              padding: "1rem",
-              fontSize: "0.78rem",
-              color: "#94a3b8",
-              lineHeight: 1.7,
-            }}
-          >
-            ⚠️ Configura todas las variables de entorno en{" "}
-            <strong>Vercel Dashboard → Settings → Environment Variables</strong> antes del despliegue.
-            Nunca incluyas secretos en el código fuente.
-          </div>
         </SettingSection>
       </div>
     </>

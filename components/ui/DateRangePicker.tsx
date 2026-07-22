@@ -12,6 +12,7 @@ const OPTIONS: { value: ComparisonPeriod; label: string; sub: string }[] = [
   { value: "yesterday", label: "Ayer", sub: "vs. día anterior" },
   { value: "7d", label: "7 días", sub: "vs. 7 días anteriores" },
   { value: "30d", label: "30 días", sub: "vs. 30 días anteriores" },
+  { value: "90d", label: "90 días", sub: "vs. 90 días anteriores" },
 ];
 
 export function DateRangePicker({ value, onChange }: DateRangePickerProps) {

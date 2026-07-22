@@ -4,7 +4,7 @@ import { z } from "zod";
 export const StatusEnum = z.enum(["continue", "optimize", "watch", "review"] as [string, ...string[]]);
 export type Status = z.infer<typeof StatusEnum>;
 
-export const ComparisonPeriodEnum = z.enum(["yesterday", "7d", "30d"] as [string, ...string[]]);
+export const ComparisonPeriodEnum = z.enum(["yesterday", "7d", "30d", "90d"] as [string, ...string[]]);
 export type ComparisonPeriod = z.infer<typeof ComparisonPeriodEnum>;
 
 export const TrendDirectionEnum = z.enum(["up", "down", "neutral"] as [string, ...string[]]);

@@ -171,44 +171,54 @@ export const SyncResultSchema = z.object({
 });
 export type SyncResult = z.infer<typeof SyncResultSchema>;
 
-/* ─── Metrics Snapshot (stored in Supabase) ─── */
-export const MetricsSnapshotSchema = z.object({
-  id: z.string().uuid(),
-  property_id: z.string(),
-  date: z.string(),           // YYYY-MM-DD
-  period: z.enum(["day", "week", "month"] as [string, ...string[]]),
-  active_users: z.number(),
-  new_users: z.number(),
-  sessions: z.number(),
-  engaged_sessions: z.number(),
-  engagement_rate: z.number(),
-  conversions: z.number(),
-  session_conversion_rate: z.number(),
-  total_revenue: z.number(),
-  raw_json: z.record(z.string(), z.unknown()).optional(),
-  created_at: z.string(),
-  updated_at: z.string(),
-});
-export type MetricsSnapshot = z.infer<typeof MetricsSnapshotSchema>;
-
 /* ─── Alert ─── */
-export const AlertSeverityEnum = z.enum(["info", "warning", "critical"] as [string, ...string[]]);
+export const AlertSeverityEnum = z.enum(["info", "low", "medium", "high", "critical"] as [string, ...string[]]);
 export type AlertSeverity = z.infer<typeof AlertSeverityEnum>;
 
 export const AlertSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().optional(),
+  fingerprint: z.string().optional(),
+  category: z.string().optional(),
   title: z.string(),
   description: z.string(),
   severity: AlertSeverityEnum,
   metric: z.string().optional(),
   threshold: z.number().optional(),
   current_value: z.number().optional(),
-  is_read: z.boolean(),
-  is_resolved: z.boolean(),
-  created_at: z.string(),
+  previous_value: z.number().optional(),
+  percentage_change: z.number().optional(),
+  affected_entity: z.string().optional(),
+  proposed_action: z.string().optional(),
+  is_read: z.boolean().optional(),
+  is_resolved: z.boolean().optional(),
+  created_at: z.string().optional(),
   resolved_at: z.string().nullable().optional(),
 });
 export type Alert = z.infer<typeof AlertSchema>;
+
+/* ─── Recommendation ─── */
+export const RecommendationPriorityEnum = z.enum(["low", "medium", "high", "critical"] as [string, ...string[]]);
+export type RecommendationPriority = z.infer<typeof RecommendationPriorityEnum>;
+
+export const RecommendationStatusEnum = z.enum(["pending", "in_progress", "completed", "dismissed"] as [string, ...string[]]);
+export type RecommendationStatus = z.infer<typeof RecommendationStatusEnum>;
+
+export const RecommendationSchema = z.object({
+  id: z.string().optional(),
+  alert_id: z.string().optional(),
+  title: z.string(),
+  problem: z.string(),
+  evidence: z.string(),
+  proposed_action: z.string(),
+  expected_impact: z.string(),
+  priority: RecommendationPriorityEnum,
+  target_metric: z.string().optional(),
+  recommended_date: z.string().optional(),
+  status: RecommendationStatusEnum,
+  created_at: z.string().optional(),
+  updated_at: z.string().optional(),
+});
+export type Recommendation = z.infer<typeof RecommendationSchema>;
 
 /* ─── Task ─── */
 export const TaskStatusEnum = z.enum(["pending", "in_progress", "done", "cancelled"] as [string, ...string[]]);
@@ -218,50 +228,21 @@ export const TaskPriorityEnum = z.enum(["low", "medium", "high", "critical"] as 
 export type TaskPriority = z.infer<typeof TaskPriorityEnum>;
 
 export const TaskSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().optional(),
+  recommendation_id: z.string().optional(),
   title: z.string(),
   description: z.string().optional(),
+  category: z.string().optional(),
   status: TaskStatusEnum,
   priority: TaskPriorityEnum,
   due_date: z.string().nullable().optional(),
   assigned_to: z.string().nullable().optional(),
+  target_metric: z.string().optional(),
   tags: z.array(z.string()).optional(),
-  created_at: z.string(),
-  updated_at: z.string(),
+  created_at: z.string().optional(),
+  updated_at: z.string().optional(),
 });
 export type Task = z.infer<typeof TaskSchema>;
-
-/* ─── Report ─── */
-export const ReportStatusEnum = z.enum(["draft", "generating", "ready", "failed"] as [string, ...string[]]);
-export type ReportStatus = z.infer<typeof ReportStatusEnum>;
-
-export const ReportSchema = z.object({
-  id: z.string().uuid(),
-  title: z.string(),
-  description: z.string().optional(),
-  status: ReportStatusEnum,
-  period_start: z.string(),
-  period_end: z.string(),
-  file_url: z.string().nullable().optional(),
-  metrics_snapshot: z.record(z.string(), z.unknown()).optional(),
-  created_at: z.string(),
-  generated_at: z.string().nullable().optional(),
-});
-export type Report = z.infer<typeof ReportSchema>;
-
-/* ─── Settings ─── */
-export const AppSettingsSchema = z.object({
-  id: z.string(),
-  ga4_property_id: z.string().optional(),
-  ga4_connected: z.boolean(),
-  supabase_connected: z.boolean(),
-  cron_enabled: z.boolean(),
-  cron_schedule: z.string().optional(),
-  alert_email: z.string().email().optional(),
-  timezone: z.string().optional(),
-  updated_at: z.string(),
-});
-export type AppSettings = z.infer<typeof AppSettingsSchema>;
 
 /* ─── Database Tables (for Supabase client typing) ─── */
 export interface Database {
@@ -297,30 +278,20 @@ export interface Database {
         Insert: Partial<AudienceMetrics>;
         Update: Partial<AudienceMetrics>;
       };
-      metrics_snapshots: {
-        Row: MetricsSnapshot;
-        Insert: Omit<MetricsSnapshot, "id" | "created_at" | "updated_at">;
-        Update: Partial<MetricsSnapshot>;
-      };
       alerts: {
         Row: Alert;
-        Insert: Omit<Alert, "id" | "created_at">;
+        Insert: Partial<Alert>;
         Update: Partial<Alert>;
+      };
+      recommendations: {
+        Row: Recommendation;
+        Insert: Partial<Recommendation>;
+        Update: Partial<Recommendation>;
       };
       tasks: {
         Row: Task;
-        Insert: Omit<Task, "id" | "created_at" | "updated_at">;
+        Insert: Partial<Task>;
         Update: Partial<Task>;
-      };
-      reports: {
-        Row: Report;
-        Insert: Omit<Report, "id" | "created_at">;
-        Update: Partial<Report>;
-      };
-      app_settings: {
-        Row: AppSettings;
-        Insert: Partial<AppSettings>;
-        Update: Partial<AppSettings>;
       };
     };
   };
