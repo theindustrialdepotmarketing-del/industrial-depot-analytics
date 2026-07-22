@@ -1,7 +1,7 @@
 export interface DiagnosticFinding {
   id: string;
   fingerprint: string;
-  category: "traffic" | "engagement" | "conversions" | "attribution" | "pages" | "devices";
+  category: "traffic" | "engagement" | "conversions" | "attribution" | "pages" | "devices" | "measurement";
   severity: "info" | "low" | "medium" | "high" | "critical";
   title: string;
   description: string;

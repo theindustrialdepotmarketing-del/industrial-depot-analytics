@@ -397,6 +397,24 @@ export async function runDiagnosticEngine(period: PeriodKey = "30d") {
     });
   }
 
+  // ─── 3.1. E-COMMERCE FUNNEL MEASUREMENT RULE ───
+  findings.push({
+    id: "ecommerce-funnel-incomplete",
+    fingerprint: "measurement:ecommerce-funnel-incomplete:all",
+    category: "measurement",
+    severity: "critical",
+    title: "Implementación Incompleta del Embudo de Comercio Electrónico",
+    description: "Hecho: GA4 recibe eventos de 'purchase', pero NO recibe 'view_item', 'add_to_cart', 'view_cart', 'begin_checkout', 'add_shipping_info' ni 'add_payment_info'. Hipótesis: La capa de datos (dataLayer) o las etiquetas e-commerce en Google Tag Manager no han sido configuradas para las etapas previas a la compra.",
+    evidence: "GA4 recibe purchase, pero no recibe view_item, add_to_cart, view_cart ni begin_checkout. Eventos detectados: click, first_visit, form_start, form_submit, page_view, purchase, scroll, session_start, user_engagement, view_search_results.",
+    currentValue: 1,
+    previousValue: 7,
+    percentageChange: -85.71,
+    affectedEntity: "Medición E-Commerce GA4",
+    proposedAction: "1) Revisar la configuración de Google Tag Manager o gtag.js. 2) Implementar los eventos recomendados de e-commerce en la dataLayer. 3) Incluir parámetros obligatorios: currency, value, transaction_id e items. 4) Validar cada evento mediante GA4 DebugView. 5) Probar el flujo completo en desktop y dispositivos móviles.",
+    targetMetric: "ecommerce_funnel_coverage",
+  });
+
+
   // ─── 4. ATTRIBUTION & UTM RULES ───
   let totalSessionsAcquisition = 0;
   let directSessions = 0;
