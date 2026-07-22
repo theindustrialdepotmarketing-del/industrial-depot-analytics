@@ -1,5 +1,27 @@
 import { z } from "zod";
 
+/* ─── Company ─── */
+export const CompanySchema = z.object({
+  id: z.string().optional(),
+  name: z.string(),
+  ga4_property_id: z.string(),
+  timezone: z.string().optional(),
+  created_at: z.string().optional(),
+  updated_at: z.string().optional(),
+});
+export type Company = z.infer<typeof CompanySchema>;
+
+export const TestSupabaseResponseSchema = z.object({
+  success: z.boolean(),
+  companyName: z.string().optional(),
+  propertyId: z.string().optional(),
+  timezone: z.string().optional(),
+  databaseConnected: z.boolean(),
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+export type TestSupabaseResponse = z.infer<typeof TestSupabaseResponseSchema>;
+
 /* ─── Metrics Snapshot (stored in Supabase) ─── */
 export const MetricsSnapshotSchema = z.object({
   id: z.string().uuid(),
@@ -96,6 +118,11 @@ export type AppSettings = z.infer<typeof AppSettingsSchema>;
 export interface Database {
   public: {
     Tables: {
+      companies: {
+        Row: Company;
+        Insert: Partial<Company>;
+        Update: Partial<Company>;
+      };
       metrics_snapshots: {
         Row: MetricsSnapshot;
         Insert: Omit<MetricsSnapshot, "id" | "created_at" | "updated_at">;

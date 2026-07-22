@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import type { TestGA4Response } from "@/lib/types/analytics";
+import type { TestSupabaseResponse } from "@/lib/types/database";
 import {
   Database,
   BarChart3,
@@ -130,39 +131,74 @@ function SettingRow({
 }
 
 export default function SettingsPage() {
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<TestGA4Response | null>(null);
-  const [testError, setTestError] = useState<string | null>(null);
+  // GA4 test state
+  const [testingGa4, setTestingGa4] = useState(false);
+  const [ga4Result, setGa4Result] = useState<TestGA4Response | null>(null);
+  const [ga4Error, setGa4Error] = useState<string | null>(null);
 
-  // Dynamic connection state: true when test succeed in Vercel environment
-  const isGa4Connected = Boolean(testResult?.success && !testResult?.isLocalEnv);
+  // Supabase test state
+  const [testingSupabase, setTestingSupabase] = useState(false);
+  const [supabaseResult, setSupabaseResult] = useState<TestSupabaseResponse | null>(null);
+  const [supabaseError, setSupabaseError] = useState<string | null>(null);
 
-  const handleTestConnection = async () => {
-    setTesting(true);
-    setTestError(null);
+  // Dynamic connection states
+  const isGa4Connected = Boolean(ga4Result?.success && !ga4Result?.isLocalEnv);
+  const isSupabaseConnected = Boolean(
+    supabaseResult?.success && supabaseResult?.databaseConnected
+  );
+
+  const handleTestGa4Connection = async () => {
+    setTestingGa4(true);
+    setGa4Error(null);
 
     try {
       const res = await fetch("/api/analytics/test");
       const data = await res.json();
 
       if (!res.ok && !data.isLocalEnv) {
-        setTestError(data.message || `Error consultando GA4 (${res.status})`);
-        setTestResult(null); // Reset connected status on error
+        setGa4Error(data.message || `Error consultando GA4 (${res.status})`);
+        setGa4Result(null);
       } else {
-        setTestResult(data);
+        setGa4Result(data);
         if (!data.success && !data.isLocalEnv) {
-          setTestResult(null);
+          setGa4Result(null);
         }
       }
     } catch (err: unknown) {
-      setTestError(
+      setGa4Error(
         err instanceof Error
           ? err.message
           : "Error de red al intentar conectar con el servidor"
       );
-      setTestResult(null);
+      setGa4Result(null);
     } finally {
-      setTesting(false);
+      setTestingGa4(false);
+    }
+  };
+
+  const handleTestSupabaseConnection = async () => {
+    setTestingSupabase(true);
+    setSupabaseError(null);
+
+    try {
+      const res = await fetch("/api/supabase/test");
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        setSupabaseError(data.message || `Error consultando Supabase (${res.status})`);
+        setSupabaseResult(null);
+      } else {
+        setSupabaseResult(data);
+      }
+    } catch (err: unknown) {
+      setSupabaseError(
+        err instanceof Error
+          ? err.message
+          : "Error de red al intentar conectar con Supabase"
+      );
+      setSupabaseResult(null);
+    } finally {
+      setTestingSupabase(false);
     }
   };
 
@@ -206,12 +242,12 @@ export default function SettingsPage() {
           >
             <div>
               <button
-                onClick={handleTestConnection}
-                disabled={testing}
+                onClick={handleTestGa4Connection}
+                disabled={testingGa4}
                 className="btn-primary"
                 style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}
               >
-                {testing ? (
+                {testingGa4 ? (
                   <>
                     <LoadingSpinner size={16} color="#ffffff" />
                     Probando conexión con GA4...
@@ -226,7 +262,7 @@ export default function SettingsPage() {
             </div>
 
             {/* Test Error display */}
-            {testError && (
+            {ga4Error && (
               <div
                 style={{
                   background: "rgba(239, 68, 68, 0.08)",
@@ -242,10 +278,10 @@ export default function SettingsPage() {
                   <AlertCircle size={18} color="#ef4444" style={{ flexShrink: 0, marginTop: "2px" }} />
                   <div>
                     <div style={{ fontWeight: 600, color: "#ef4444", fontSize: "0.85rem" }}>
-                      Error en la prueba de conexión
+                      Error en la prueba de conexión GA4
                     </div>
                     <div style={{ color: "#94a3b8", fontSize: "0.8rem", marginTop: "0.25rem", lineHeight: 1.5 }}>
-                      {testError}
+                      {ga4Error}
                     </div>
                   </div>
                 </div>
@@ -253,7 +289,7 @@ export default function SettingsPage() {
             )}
 
             {/* Test Result display */}
-            {testResult && testResult.isLocalEnv && (
+            {ga4Result && ga4Result.isLocalEnv && (
               <div
                 style={{
                   background: "rgba(30, 155, 215, 0.08)",
@@ -271,14 +307,14 @@ export default function SettingsPage() {
                     Entorno Local Detectado
                   </div>
                   <div style={{ color: "#94a3b8", fontSize: "0.8rem", marginTop: "0.25rem", lineHeight: 1.6 }}>
-                    {testResult.message ||
+                    {ga4Result.message ||
                       "La prueba de autenticación OIDC + Workload Identity Federation debe ejecutarse desde un deployment en Vercel. En desarrollo local no existe token OIDC activo."}
                   </div>
                 </div>
               </div>
             )}
 
-            {testResult && testResult.success && !testResult.isLocalEnv && (
+            {ga4Result && ga4Result.success && !ga4Result.isLocalEnv && (
               <div
                 style={{
                   background: "rgba(34, 197, 94, 0.08)",
@@ -308,48 +344,48 @@ export default function SettingsPage() {
                   <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
                     <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Período</div>
                     <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.2rem" }}>
-                      {testResult.period.description}
+                      {ga4Result.period.description}
                     </div>
                   </div>
 
                   <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
                     <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Filas Consultadas</div>
                     <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.2rem" }}>
-                      {testResult.rowCount} días
+                      {ga4Result.rowCount} días
                     </div>
                   </div>
 
                   <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
                     <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Usuarios Activos</div>
                     <div style={{ color: "#1e9bd7", fontWeight: 700, marginTop: "0.2rem" }}>
-                      {testResult.summary.activeUsers.toLocaleString()}
+                      {ga4Result.summary.activeUsers.toLocaleString()}
                     </div>
                   </div>
 
                   <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
                     <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Nuevos Usuarios</div>
                     <div style={{ color: "#1e9bd7", fontWeight: 700, marginTop: "0.2rem" }}>
-                      {testResult.summary.newUsers.toLocaleString()}
+                      {ga4Result.summary.newUsers.toLocaleString()}
                     </div>
                   </div>
 
                   <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
                     <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Sesiones</div>
                     <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.2rem" }}>
-                      {testResult.summary.sessions.toLocaleString()}
+                      {ga4Result.summary.sessions.toLocaleString()}
                     </div>
                   </div>
 
                   <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
                     <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Key Events</div>
                     <div style={{ color: "#22c55e", fontWeight: 700, marginTop: "0.2rem" }}>
-                      {testResult.summary.keyEvents.toLocaleString()}
+                      {ga4Result.summary.keyEvents.toLocaleString()}
                     </div>
                   </div>
                 </div>
 
                 {/* Safe Diagnostics Block */}
-                {testResult.diagnostics && (
+                {ga4Result.diagnostics && (
                   <div
                     style={{
                       background: "rgba(15,23,42,0.8)",
@@ -365,32 +401,32 @@ export default function SettingsPage() {
                     <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", color: "#94a3b8" }}>
                       <span>
                         OIDC Token:{" "}
-                        <strong style={{ color: testResult.diagnostics.oidcTokenReceived ? "#22c55e" : "#ef4444" }}>
-                          {testResult.diagnostics.oidcTokenReceived ? "OK" : "NO"}
+                        <strong style={{ color: ga4Result.diagnostics.oidcTokenReceived ? "#22c55e" : "#ef4444" }}>
+                          {ga4Result.diagnostics.oidcTokenReceived ? "OK" : "NO"}
                         </strong>
                       </span>
                       <span>
                         Intercambio WIF:{" "}
-                        <strong style={{ color: testResult.diagnostics.workloadIdentityExchange === "success" ? "#22c55e" : "#ef4444" }}>
-                          {testResult.diagnostics.workloadIdentityExchange}
+                        <strong style={{ color: ga4Result.diagnostics.workloadIdentityExchange === "success" ? "#22c55e" : "#ef4444" }}>
+                          {ga4Result.diagnostics.workloadIdentityExchange}
                         </strong>
                       </span>
                       <span>
                         Impersonación:{" "}
-                        <strong style={{ color: testResult.diagnostics.serviceAccountImpersonation === "success" ? "#22c55e" : "#ef4444" }}>
-                          {testResult.diagnostics.serviceAccountImpersonation}
+                        <strong style={{ color: ga4Result.diagnostics.serviceAccountImpersonation === "success" ? "#22c55e" : "#ef4444" }}>
+                          {ga4Result.diagnostics.serviceAccountImpersonation}
                         </strong>
                       </span>
                       <span>
                         OAuth Scopes:{" "}
-                        <strong style={{ color: testResult.diagnostics.analyticsScopeConfigured ? "#22c55e" : "#ef4444" }}>
-                          {testResult.diagnostics.analyticsScopeConfigured ? "analytics.readonly" : "Falta"}
+                        <strong style={{ color: ga4Result.diagnostics.analyticsScopeConfigured ? "#22c55e" : "#ef4444" }}>
+                          {ga4Result.diagnostics.analyticsScopeConfigured ? "analytics.readonly" : "Falta"}
                         </strong>
                       </span>
                       <span>
                         Consulta GA4:{" "}
-                        <strong style={{ color: testResult.diagnostics.ga4Query === "success" ? "#22c55e" : "#ef4444" }}>
-                          {testResult.diagnostics.ga4Query}
+                        <strong style={{ color: ga4Result.diagnostics.ga4Query === "success" ? "#22c55e" : "#ef4444" }}>
+                          {ga4Result.diagnostics.ga4Query}
                         </strong>
                       </span>
                     </div>
@@ -399,46 +435,138 @@ export default function SettingsPage() {
               </div>
             )}
           </div>
-
-          <div
-            style={{
-              background: "rgba(30,155,215,0.06)",
-              border: "1px solid rgba(30,155,215,0.15)",
-              borderRadius: "8px",
-              padding: "1rem",
-              fontSize: "0.8rem",
-              color: "#64748b",
-              lineHeight: 1.7,
-            }}
-          >
-            <strong style={{ color: "#94a3b8" }}>Arquitectura de Autenticación:</strong>
-            <br />
-            1. Vercel genera automáticamente un token JWT OIDC firmado por despliegue.
-            <br />
-            2. Google Workload Identity Federation valida el token sin requerir archivos JSON.
-            <br />
-            3. GCP otorga permisos temporales impersonando la cuenta{" "}
-            <code style={{ color: "#1e9bd7" }}>ga4-dashboard-reader@...</code> incluyendo los OAuth Scopes{" "}
-            <code style={{ color: "#1e9bd7" }}>analytics.readonly</code> y{" "}
-            <code style={{ color: "#1e9bd7" }}>cloud-platform</code>.
-            <br />
-            4. Ningún secreto ni clave privada permanente es almacenada o expuesta al navegador.
-          </div>
         </SettingSection>
 
-        {/* Supabase */}
+        {/* Supabase Section */}
         <SettingSection title="Supabase" icon={Database}>
           <SettingRow
             label="Proyecto Supabase"
-            desc="Base de datos para métricas, alertas y tareas"
-            value="No configurado"
-            connected={false}
+            desc="Base de datos para métricas, empresas, alertas y tareas"
+            value={supabaseResult?.companyName ? `Empresa: ${supabaseResult.companyName}` : "Base de datos"}
+            connected={isSupabaseConnected}
           />
           <SettingRow
-            label="Service Role Key"
-            desc="Solo usada en el servidor — nunca expuesta al navegador"
-            connected={false}
+            label="Secret Key / Key Administrativa"
+            desc="Autenticación server-only segura (SUPABASE_SECRET_KEY)"
+            connected={isSupabaseConnected}
           />
+
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "1rem",
+              paddingTop: "0.5rem",
+              borderTop: "1px solid var(--border-color)",
+            }}
+          >
+            <div>
+              <button
+                onClick={handleTestSupabaseConnection}
+                disabled={testingSupabase}
+                className="btn-primary"
+                style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}
+              >
+                {testingSupabase ? (
+                  <>
+                    <LoadingSpinner size={16} color="#ffffff" />
+                    Probando conexión con Supabase...
+                  </>
+                ) : (
+                  <>
+                    <Play size={15} />
+                    Probar conexión con Supabase
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Supabase Error display */}
+            {supabaseError && (
+              <div
+                style={{
+                  background: "rgba(239, 68, 68, 0.08)",
+                  border: "1px solid rgba(239, 68, 68, 0.25)",
+                  borderRadius: "8px",
+                  padding: "1rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "0.5rem",
+                }}
+              >
+                <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
+                  <AlertCircle size={18} color="#ef4444" style={{ flexShrink: 0, marginTop: "2px" }} />
+                  <div>
+                    <div style={{ fontWeight: 600, color: "#ef4444", fontSize: "0.85rem" }}>
+                      Error en la prueba de conexión Supabase
+                    </div>
+                    <div style={{ color: "#94a3b8", fontSize: "0.8rem", marginTop: "0.25rem", lineHeight: 1.5 }}>
+                      {supabaseError}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Supabase Result display */}
+            {supabaseResult && supabaseResult.success && (
+              <div
+                style={{
+                  background: "rgba(34, 197, 94, 0.08)",
+                  border: "1px solid rgba(34, 197, 94, 0.25)",
+                  borderRadius: "8px",
+                  padding: "1.25rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "1rem",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <CheckCircle2 size={18} color="#22c55e" />
+                  <span style={{ fontWeight: 700, color: "#22c55e", fontSize: "0.9rem" }}>
+                    ¡Conexión Exitosa con Supabase!
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+                    gap: "0.75rem",
+                    fontSize: "0.8rem",
+                  }}
+                >
+                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
+                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Empresa Encontrada</div>
+                    <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.2rem" }}>
+                      {supabaseResult.companyName}
+                    </div>
+                  </div>
+
+                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
+                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>GA4 Property ID</div>
+                    <div style={{ color: "#1e9bd7", fontWeight: 700, marginTop: "0.2rem" }}>
+                      {supabaseResult.propertyId}
+                    </div>
+                  </div>
+
+                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
+                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Zona Horaria</div>
+                    <div style={{ color: "#f1f5f9", fontWeight: 600, marginTop: "0.2rem" }}>
+                      {supabaseResult.timezone}
+                    </div>
+                  </div>
+
+                  <div style={{ background: "rgba(15,23,42,0.6)", padding: "0.6rem 0.8rem", borderRadius: "6px" }}>
+                    <div style={{ color: "#64748b", fontSize: "0.7rem", textTransform: "uppercase" }}>Estado BD</div>
+                    <div style={{ color: "#22c55e", fontWeight: 700, marginTop: "0.2rem" }}>
+                      Conectado
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </SettingSection>
 
         {/* Cron */}
